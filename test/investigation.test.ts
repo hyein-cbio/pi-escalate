@@ -61,6 +61,29 @@ async function workspace() {
   return { dir, dispose: () => rm(dir, { recursive: true, force: true }) };
 }
 
+test("denied filesystem paths stay private child evidence without granting another execution", async () => {
+  const w = await workspace();
+  const outside = await mkdtemp(join(tmpdir(), "pi-outside-evidence-"));
+  try {
+    const secret = join(outside, "secret.ts");
+    await writeFile(secret, "OUTSIDE-PRIVATE-CONTENT");
+    const f = fixture((index, context) => {
+      if (index === 0) return message(READ_ONLY_TOOL_NAMES.map((name) =>
+        call(name, { path: secret, pattern: "*" })), "toolUse");
+      const results = context.messages.filter((entry) => entry.role === "toolResult");
+      assert.equal(results.length, 4);
+      assert(results.every((entry) => entry.isError));
+      assert(!JSON.stringify(results).includes("OUTSIDE-PRIVATE-CONTENT"));
+      return message([{ type: "text", text: "The files are outside the read boundary; no contents were inspected." }]);
+    });
+    const result = await escalate({ question: "Q" }, config, f.registry, undefined, w.dir);
+    assert.equal(f.calls.length, 2);
+    assert.equal(result.usage.totalTokens, 70);
+    assert(!JSON.stringify(result).includes("OUTSIDE-PRIVATE-CONTENT"));
+    assert(!JSON.stringify(result).includes(outside));
+  } finally { await w.dispose(); await rm(outside, { recursive: true, force: true }); }
+});
+
 test("Astra uses all four native tools, receives results privately, and returns only the final answer with total usage", async () => {
   const w = await workspace();
   try {

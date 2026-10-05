@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import extension from "../src/index.ts";
+import extension from "../src/extension.ts";
 import { EscalatePermission } from "../src/permission.ts";
 
 type Command = Parameters<ExtensionAPI["registerCommand"]>[1];
@@ -155,7 +155,8 @@ test("aborted or missing signals cannot authorize execution", () => {
   for (const signal of [undefined, AbortSignal.abort()]) {
     const permission = new EscalatePermission();
     const ctx = context("a", signal);
-    grant(permission, ctx);
+    if (signal === undefined) assert.throws(() => grant(permission, ctx), /incompatible Pi host.*context.signal/);
+    else grant(permission, ctx);
     assert.throws(() => permission.consume(ctx), /use \/escalate/);
   }
   const permission = new EscalatePermission();

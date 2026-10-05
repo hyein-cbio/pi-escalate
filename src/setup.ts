@@ -1,14 +1,13 @@
 import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import {
-  Input, SelectList, truncateToWidth,
-  type Component, type Focusable, type KeybindingsManager, type SelectItem,
-} from "@earendil-works/pi-tui";
+import * as tuiApi from "@earendil-works/pi-tui";
+import type { Component, Focusable, KeybindingsManager, SelectItem, SelectList } from "@earendil-works/pi-tui";
 import { readOptionalConfig, writeConfig, type EscalateConfig } from "./config.ts";
+import { assertFunctions, assertRegistry } from "./compatibility.ts";
 
 /** Searchable picker composed from Pi's native input and selection components. */
 export class SetupPicker implements Component, Focusable {
-  private readonly search = new Input({ prompt: "Search: ", placeholder: "type to filter" });
+  private readonly search = new tuiApi.Input({ prompt: "Search: ", placeholder: "type to filter" });
   private list!: SelectList;
   private filtered: SelectItem[] = [];
   private closed = false;
@@ -23,6 +22,8 @@ export class SetupPicker implements Component, Focusable {
     private readonly requestRender: () => void,
     private readonly saves = false,
   ) {
+    assertFunctions(keys, ["matches", "getKeys"], "keybindings");
+    assertFunctions(theme, ["fg", "bold"], "theme");
     this.rebuild();
   }
 
@@ -33,7 +34,7 @@ export class SetupPicker implements Component, Focusable {
     const query = this.search.getValue().trim().toLowerCase();
     this.filtered = this.items.filter((item) =>
       `${item.value} ${item.label} ${item.description ?? ""}`.toLowerCase().includes(query));
-    this.list = new SelectList(this.filtered, 8, {
+    this.list = new tuiApi.SelectList(this.filtered, 8, {
       selectedPrefix: (text) => this.theme.fg("accent", text),
       selectedText: (text) => this.theme.fg("accent", text),
       description: (text) => this.theme.fg("muted", text),
@@ -90,7 +91,7 @@ export class SetupPicker implements Component, Focusable {
       ...(this.filtered.length ? this.list.render(width) : [this.theme.fg("warning", "No matching options")]),
       "",
       this.theme.fg("dim", `${confirm} ${this.saves ? "save" : "select"} · ${cancel} cancel · type to search`),
-    ].map((line) => truncateToWidth(line, width));
+    ].map((line) => tuiApi.truncateToWidth(line, width));
   }
 }
 
@@ -107,11 +108,17 @@ export function availableTargets(ctx: Pick<ExtensionCommandContext, "modelRegist
 async function pick(
   ctx: ExtensionCommandContext, title: string, items: SelectItem[], initial?: string, saves = false,
 ): Promise<string | undefined> {
-  return ctx.ui.custom<string | undefined>((tui, theme, keys, done) =>
-    new SetupPicker(title, items, initial, theme, keys, done, () => tui.requestRender(), saves));
+  return ctx.ui.custom<string | undefined>((tui, theme, keys, done) => {
+    assertFunctions(tui, ["requestRender"], "TUI");
+    return new SetupPicker(title, items, initial, theme, keys, done, () => tui.requestRender(), saves);
+  });
 }
 
 export async function configureEscalation(ctx: ExtensionCommandContext, path: string): Promise<void> {
+  // TUI dependencies are checked only on the settings path, never during headless work.
+  assertFunctions(tuiApi, ["Input", "SelectList", "truncateToWidth"], "pi-tui");
+  assertFunctions(ctx.ui, ["custom", "notify"], "UI");
+  assertRegistry(ctx.modelRegistry, true);
   const models = availableTargets(ctx);
   if (!models.length) {
     ctx.ui.notify("pi-escalate: no authenticated chat models available. Configure a provider with /login or models.json.", "warning");

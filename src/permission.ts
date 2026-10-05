@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { assertRunSignal, assertSessionContext } from "./compatibility.ts";
 
 /** Ephemeral, single-use permission. Never reconstructed from conversation history. */
 export class EscalatePermission {
@@ -21,7 +22,16 @@ export class EscalatePermission {
   }
 
   start(ctx: ExtensionContext): void {
-    if (this.grant?.session !== ctx.sessionManager.getSessionId() || !ctx.signal || ctx.signal.aborted) {
+    // Ordinary parent runs need no escalation-specific signal checks.
+    if (!this.grant) return;
+    try {
+      assertSessionContext(ctx);
+      assertRunSignal(ctx.signal);
+    } catch (error) {
+      this.clear();
+      throw error;
+    }
+    if (this.grant.session !== ctx.sessionManager.getSessionId() || !ctx.signal || ctx.signal.aborted) {
       this.clear();
       return;
     }

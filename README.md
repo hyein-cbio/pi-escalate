@@ -8,7 +8,19 @@ This is not an automatic model router. **Only `/escalate` grants permission for 
 
 ## Install
 
-Requires Pi's codemode, structured tool results, and nested-usage accounting APIs. Tested with **Pi 1.0.3** and Node.js 22.19+.
+Requires a stable **Pi 0.99.x or 1.x** release (`@earendil-works/pi-coding-agent`), with **0.99.0 as the minimum**, and **Node.js 22.19+**. **Pi 1.0.0+ is recommended** for its smaller codemode prompt footprint. Stable future 1.x minors are allowed subject to essential capability checks, not automatically blacklisted; this is not a claim that every future version was tested. See [host compatibility](COMPATIBILITY.md) for the runtime policy and reproducible checks.
+
+Pi [0.99.0](https://github.com/earendil-works/pi/releases/tag/v0.99.0) introduced the required built-in codemode, tool exposure, structured tool results, nested execution, and usage-accounting APIs. Pi [1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0) made codemode leaner; it is not the first version that provides these APIs.
+
+Verified compatibility for pi-escalate 0.1.2:
+
+| Pi version | Type check | Tests |
+|---|---|---|
+| 0.99.0 | Passed | 115/115 passed |
+| 1.0.0 | Passed | 115/115 passed |
+| 1.0.3 | Passed | 115/115 passed |
+
+The 0.99.0 and 1.0.0 checks ran in isolated installations with every Pi-family dependency pinned to the tested version, including transitive dependencies. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; they do not require paid model calls. Checks used Node.js 22.23.1; the exact Node.js 22.19 engine floor was not separately rerun. The preceding 0.87.1 package lacks the required codemode/tool APIs and was verified to fail clearly before any extension registration or request.
 
 Install from npm:
 
@@ -126,7 +138,7 @@ Do not put huge inputs literally into the codemode source: the source itself is 
 ## Fixed execution policy
 
 - At most one investigator execution per `/escalate`. It uses Pi's `Agent` loop in memory, without creating an `AgentSession`, loading resources, or providing steering/resume APIs.
-- Exactly **`read`, `grep`, `find`, `ls`** in the parent's working directory. No bash, PowerShell, edit, write, codemode, nested escalation, or MCP tools. A response that requests any tool outside this allowlist fails before its tool batch executes.
+- Exactly **`read`, `grep`, `find`, `ls`**, with file contents confined to the real path of the parent's working directory. Internal symlinks and normal path aliases are allowed; unrelated external links do not fail an entire search. No bash, PowerShell, edit, write, codemode, nested escalation, or MCP tools. A response that requests any tool outside this allowlist fails before its tool batch executes.
 - Fixed limits: **12 model requests total**, **24 actual tool executions**, and **15 minutes for the entire investigation**. The last available request is reserved for a tool-free final report; reaching the tool limit also triggers that final-report phase. A limited report is marked `truncated: true`, with a notice that further verification may be needed. If the target still tries to use tools instead of reporting, execution fails rather than continuing indefinitely.
 - Tool results are private to the child. Native Pi tool limits apply, and individual text blocks are further capped at **12,000 UTF-16 code units** with a notice to use read offsets or narrower searches. Missing files and failed tools are returned to the target as error evidence. Images are omitted from tool results when the target lacks image support.
 - A small private system prompt asks for an evidence-based final answer, normally below 1,000 words, in the question's language. Intermediate assistant text and thinking are never returned to the parent.
@@ -134,12 +146,18 @@ Do not put huge inputs literally into the codemode source: the source itself is 
 - Generation is capped at **16,384 tokens per model request**, or the model's smaller declared maximum. Some providers count reasoning within this budget, so the final answer can be shorter or absent.
 - Cancellation follows the parent tool/session signal and aborts the child's model requests and native tools. The outer deadline still returns if a custom provider ignores cancellation; underlying provider shutdown remains best-effort, not OS-process containment. Provider SDK retries are requested off (`maxRetries: 0`); individual providers may differ in how they honor options.
 - SSE transport and no prompt-cache retention are requested on every request. This does not guarantee provider-side deletion or zero retention.
-- Search uses Pi's native ripgrep/fd tools. Existing binaries are checked in Pi's bin directory or PATH; missing binaries produce a tool error rather than requesting an automatic download. Install `rg` and `fd` (or `fdfind`) beforehand if necessary.
+- Tool names and schemas come from Pi's read-only tools. Read/ls use boundary-checked native operations; grep/find use controlled ripgrep/fd invocations with no symlink following. Ripgrep configuration/preprocessors are disabled. Existing binaries are checked in Pi's bin directory or PATH; missing binaries produce a tool error rather than an automatic download. Install current `rg` and `fd` (or `fdfind`) beforehand. Searches respect ignore rules, cap results at 1,000 and raw utility output at 2 MiB, and report clipping; the investigator's 12,000-character text cap still applies.
 - Errors do not echo provider error bodies, submitted context, or credentials. Usage and cost are summed over all completed target responses, including a completed failed response, and passed to parent tool accounting without printing them into the answer.
 
-### Read-only is not a filesystem sandbox
+### Filesystem read boundary
 
-The four tools use Pi's normal path semantics: relative paths resolve from the parent's `cwd`, and absolute paths, parent-directory paths, and symlinks are not confined to that directory. They run with the host user's filesystem access. Only use a trusted model/provider, and do not treat the tool allowlist as a boundary against reading sensitive files. The child has its own fixed tool hooks and does not inherit parent extensions' filesystem permission hooks; filesystem confinement would require a separate design.
+Each investigation pins `realpath(cwd)` as its read root. Containment is checked **after canonicalization**, so macOS `/var`/`/private/var` aliases, a symlinked cwd, and alternative paths to the same internal file do not get falsely rejected. A sibling with a similar name is still outside. Direct access to a symlink resolving outside the root is denied; internal symlinks are permitted.
+
+Recursive searches do not automatically follow symlink directories. External or broken links are omitted from find/ls results instead of failing the entire operation. An internal directory link can be searched explicitly by setting the tool's `path`; it resolves to its permitted canonical target. No preliminary traversal of hidden/ignored trees is performed, so an ignored external `node_modules` dependency does not veto an unrelated source search. Grep validates each reported file before returning match/context events streamed by ripgrep, without loading whole files for context. Partial traversal failures retain usable search output with a warning.
+
+Literal Unicode filenames are preserved. `@`, `~`, file URLs, and supported Windows drive shorthands resolve before checking; Unicode-space fallback is used only if the literal path is missing. Read/ls receive encoded canonical file URLs so Pi cannot normalize a verified filename into another file. Boundary failures remain private child tool evidence and grant no additional execution.
+
+This is an application-level boundary, **not an OS sandbox**. Concurrent path replacement, hard links, mounts, and utilities' ignore-file access are not isolated. Keep the workspace and binaries trusted. Sensitive files **inside** the root remain readable. Parent extensions' permission hooks are not inherited. The boundary controls the investigator's own file access, not reference material deliberately supplied through `context`. There is no new boundary configuration key: settings remain model and reasoning level only.
 
 ## What is—and is not—recorded
 

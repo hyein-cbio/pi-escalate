@@ -14,7 +14,7 @@ import {
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { parseConfig, readConfig } from "../src/config.ts";
 import { escalate, EscalateError, limitAnswer, MAX_ANSWER_CHARS, REQUEST_TIMEOUT_MS } from "../src/escalate.ts";
-import extension from "../src/index.ts";
+import extension from "../src/extension.ts";
 
 const model: Model<"openai-completions"> = {
   provider: "fixture", id: "org/astra", name: "Astra",

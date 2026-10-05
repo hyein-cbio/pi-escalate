@@ -4,6 +4,7 @@ import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { EscalateConfig } from "./config.ts";
 import { createInvestigationTools, READ_ONLY_TOOL_NAMES } from "./investigation-tools.ts";
+import { assertRegistry } from "./compatibility.ts";
 
 export const MAX_ANSWER_CHARS = 12_000;
 export const REQUEST_TIMEOUT_MS = 900_000;
@@ -94,6 +95,7 @@ export async function escalate(
   callerSignal?: AbortSignal,
   cwd = process.cwd(),
 ): Promise<Escalation> {
+  assertRegistry(registry);
   if (!input.question.trim()) throw new Error("pi-escalate: question must not be blank.");
   const separator = config.model.indexOf("/");
   const model = registry.find(config.model.slice(0, separator), config.model.slice(separator + 1));

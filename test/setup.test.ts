@@ -7,7 +7,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, type SelectItem } from "@earendil-works/pi-tui";
 import { readOptionalConfig, writeConfig } from "../src/config.ts";
-import extension from "../src/index.ts";
+import extension from "../src/extension.ts";
 import { availableTargets, configureEscalation, SetupPicker } from "../src/setup.ts";
 
 const keys = new KeybindingsManager(TUI_KEYBINDINGS);
