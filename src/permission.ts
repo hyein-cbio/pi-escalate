@@ -32,7 +32,7 @@ export class EscalatePermission {
     const grant = this.grant;
     if (!grant || !grant.signal || grant.signal.aborted || grant.signal !== ctx.signal ||
       grant.session !== ctx.sessionManager.getSessionId()) {
-      throw new Error("pi-escalate: use /escalate <request> to authorize one consultation.");
+      throw new Error("pi-escalate: use /escalate <request> to authorize one read-only investigation.");
     }
     // Consume synchronously, before any asynchronous work or provider call.
     this.clear();

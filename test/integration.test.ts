@@ -36,7 +36,7 @@ function sendAnswer(res: ServerResponse, model: string, delta: object, finish = 
   res.end("data: [DONE]\n\n");
 }
 
-async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice = false, configureFirst = false) {
+async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice = false, configureFirst = false, investigate = false) {
   const dir = await mkdtemp(join(tmpdir(), "pi-escalate-integration-"));
   const cwd = join(dir, "workspace");
   const agentDir = join(dir, "agent");
@@ -61,6 +61,7 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
   ].join("\n");
 
   let parentCalls = 0;
+  let childCalls = 0;
   const server = createServer(async (req, res) => {
     try {
       let body = "";
@@ -71,7 +72,23 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
         if (targetFails) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: REFERENCE + " PRIVATE-KEY", type: "invalid_request_error" } }));
+        } else if (investigate && childCalls++ === 0) {
+          sendAnswer(res, "astra", {
+            reasoning_content: PRIVATE_THINKING, content: "PRIVATE-INTERMEDIATE",
+            tool_calls: [
+              ["ls", { path: "." }], ["find", { pattern: "*.txt" }],
+              ["grep", { pattern: "PRIVATE-REFERENCE", path: "reference.txt" }],
+              ["read", { path: "reference.txt" }],
+            ].map(([name, args], index) => ({
+              index, id: "child-" + name, type: "function",
+              function: { name, arguments: JSON.stringify(args) },
+            })),
+          }, "tool_calls");
         } else {
+          if (investigate) {
+            assert.equal(request.messages.filter((message) => message.role === "tool").length, 4);
+            assert(JSON.stringify(request.messages).includes("PRIVATE-REFERENCE"));
+          }
           sendAnswer(res, "astra", { reasoning_content: PRIVATE_THINKING, content: ANSWER });
         }
       } else if (parentCalls++ === 0) {
@@ -175,10 +192,10 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
     assert.deepEqual((await readdir(dir, { recursive: true })).sort(), beforeFiles);
 
     const target = requests.filter((request) => request.model === "astra");
-    assert.equal(target.length, invokeCommand ? 1 : 0);
+    assert.equal(target.length, invokeCommand ? (investigate && !targetFails ? 2 : 1) : 0);
     for (const request of target) {
       assert.equal(request.reasoning_effort, "high");
-      assert(!request.tools?.length);
+      assert.deepEqual(request.tools?.map((tool) => tool.function?.name), ["read", "grep", "find", "ls"]);
       assert(!JSON.stringify(request).includes("MAIN-PRIVATE-HISTORY"));
       assert.equal(request.messages.filter((message) => message.role === "user").length, 1);
     }
@@ -190,6 +207,8 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
     const continuation = JSON.stringify(parents[1]);
     assert(!continuation.includes("PRIVATE-REFERENCE"));
     assert(!continuation.includes(PRIVATE_THINKING));
+    assert(!continuation.includes("PRIVATE-INTERMEDIATE"));
+    assert(!continuation.includes("child-read"));
     assert(!continuation.includes("PRIVATE-KEY"));
     const toolResult = session.messages.find((message) => message.role === "toolResult");
     assert(toolResult && toolResult.role === "toolResult");
@@ -211,7 +230,7 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
       assert(continuation.includes("did not return a completed text answer"));
     } else {
       assert(continuation.includes(ANSWER));
-      assert.equal(toolResult.usage?.totalTokens, 30);
+      assert.equal(toolResult.usage?.totalTokens, investigate ? 60 : 30);
       if (attemptTwice) assert(continuation.includes("SECOND-BLOCKED"));
     }
   } finally {
@@ -234,3 +253,5 @@ test("real Pi + codemode + HTTP: /escalate authorizes exactly one call, even in 
   { timeout: 30_000 }, () => scenario(false, true, true));
 test("real Pi loader + settings TUI: lazy UI loads, saves without model calls or context, and never authorizes escalation",
   { timeout: 30_000 }, () => scenario(false, false, false, true));
+test("real Pi + codemode + HTTP: Astra investigates with four native tools; only its final answer reaches Sol",
+  { timeout: 30_000 }, () => scenario(false, true, false, false, true));

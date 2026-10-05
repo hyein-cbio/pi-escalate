@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   createAssistantMessageEventStream,
+  getCurrentTools,
   type AssistantMessage,
   type Context,
   type Model,
@@ -93,7 +94,7 @@ test("config file errors are concise and do not echo file contents", async () =>
   }
 });
 
-test("one isolated request, no history/tools, concise answer and usage only", async () => {
+test("one isolated investigation, fixed read-only tools, concise answer and usage only", async () => {
   const f = fixture(response({
     content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: " Answer. " }],
   }));
@@ -102,14 +103,15 @@ test("one isolated request, no history/tools, concise answer and usage only", as
   assert.equal(result.usage.totalTokens, 30);
   assert.equal(f.calls.length, 1);
   const { context, options } = f.calls[0];
-  assert.equal(context.messages.length, 1);
-  assert.deepEqual(context.tools, []);
-  assert.deepEqual(JSON.parse((context.messages[0].content as Array<{ text: string }>)[0].text),
+  const users = context.messages.filter((message) => message.role === "user");
+  assert.equal(users.length, 1);
+  assert.deepEqual(getCurrentTools(context.messages).map((tool) => tool.name), ["read", "grep", "find", "ls"]);
+  assert.deepEqual(JSON.parse((users[0].content as Array<{ text: string }>)[0].text),
     { question: "Question?", context: "reference" });
   assert.equal(options?.reasoning, "high");
   assert.equal(options?.cacheRetention, "none");
   assert.equal(options?.maxRetries, 0);
-  assert.equal(options?.toolChoice, "none");
+  assert.equal(options?.toolChoice, "auto");
   assert.equal(options?.transport, "sse");
   assert.equal(options?.timeoutMs, REQUEST_TIMEOUT_MS);
   assert.equal(options?.sessionId, undefined);
@@ -214,17 +216,17 @@ test("cancellation interrupts an uncooperative provider", async () => {
   await assert.rejects(promise, /cancelled/);
 });
 
-test("five-minute deadline also interrupts an uncooperative provider", async (t) => {
+test("fifteen-minute deadline also interrupts an uncooperative provider", async (t) => {
   const f = fixture();
   f.raw.streamSimple = () => createAssistantMessageEventStream();
   const controller = new AbortController();
   t.mock.method(AbortSignal, "timeout", (ms: number) => {
-    assert.equal(ms, 300_000);
+    assert.equal(ms, 900_000);
     return controller.signal;
   });
   const promise = escalate({ question: "Q" }, config, f.registry);
   controller.abort(new DOMException("deadline", "TimeoutError"));
-  await assert.rejects(promise, /timed out/);
+  await assert.rejects(promise, /timed out after fifteen minutes/);
 });
 
 test("extension registers only one codemode tool with no per-call routing settings", () => {

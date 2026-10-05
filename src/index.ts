@@ -36,7 +36,7 @@ export default function piEscalate(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("escalate", {
-    description: "Consult the configured model once about this request, without switching the main model.",
+    description: "Run one read-only investigation with the configured model, without switching the main model.",
     handler: async (args, ctx) => {
       const fail = (message: string) => {
         if (ctx.hasUI) ctx.ui.notify(message, "warning");
@@ -51,7 +51,8 @@ export default function piEscalate(pi: ExtensionAPI) {
       }
       const prompt = [
         `Escalate once: ${args.trim()}`,
-        "Use codemode to prepare only the necessary reference data and call tools.escalate exactly once.",
+        "Use codemode to identify relevant files and prepare minimal context; call tools.escalate exactly once.",
+        "The investigator can use read, grep, find, and ls in this working directory. Do not prefetch whole files unnecessarily.",
         "Make its question self-contained; do not forward the conversation or print reference data.",
         "Print result.answer and note result.truncated if true. Summarize briefly without duplicating long output; do not implement fixes.",
         "If required context is unclear, ask the user instead of guessing or making an unrelated call.",
@@ -83,8 +84,8 @@ export default function piEscalate(pi: ExtensionAPI) {
     name: "escalate",
     label: "Escalate",
     description:
-      "Only after /escalate: consult the configured model once about its requested question. " +
-      "Send only necessary context; no history or tools are inherited. " +
+      "Only after /escalate: run one read-only investigation of its requested question. " +
+      "The target has read, grep, find, ls; no history or extensions are inherited. Send minimal context. " +
       "Returns { answer, truncated }. Print only what you need from codemode.",
     exposure: "codemode",
     annotations: {
@@ -107,7 +108,7 @@ export default function piEscalate(pi: ExtensionAPI) {
       try {
         const signals = [signal, ctx.signal].filter((item): item is AbortSignal => item !== undefined);
         const result = await escalate(params, config, ctx.modelRegistry,
-          signals.length ? AbortSignal.any(signals) : undefined);
+          signals.length ? AbortSignal.any(signals) : undefined, ctx.cwd);
         return {
           content: [{ type: "text", text: result.output.answer }],
           structuredContent: { ...result.output },
