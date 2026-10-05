@@ -10,19 +10,7 @@ This is not an automatic model router. **Only `/escalate` grants permission to c
 
 Requires Pi's codemode, structured tool results, and nested-usage accounting APIs. Tested with **Pi 1.0.3** and Node.js 22.19+.
 
-From a local checkout:
-
-```sh
-pi install /path/to/pi-escalate
-```
-
-From GitHub, after the repository has been pushed:
-
-```sh
-pi install git:github.com/hyein-cbio/pi-escalate
-```
-
-From npm, after publication:
+Install from npm:
 
 ```sh
 pi install npm:@hyein-cbio/pi-escalate
