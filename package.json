@@ -1,0 +1,59 @@
+{
+  "name": "@hyein-cbio/pi-escalate",
+  "version": "0.1.0",
+  "description": "One-shot headless model consultation for Pi, without switching the main model or persisting child transcripts.",
+  "type": "module",
+  "license": "MIT",
+  "author": "hyein-cbio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyein-cbio/pi-escalate.git"
+  },
+  "homepage": "https://github.com/hyein-cbio/pi-escalate#readme",
+  "bugs": {
+    "url": "https://github.com/hyein-cbio/pi-escalate/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "codemode",
+    "model",
+    "escalation"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run check && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.0.3",
+    "@earendil-works/pi-coding-agent": "1.0.3",
+    "@earendil-works/pi-tui": "1.0.3",
+    "typebox": "1.3.27",
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
