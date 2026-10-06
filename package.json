@@ -1,6 +1,6 @@
 {
   "name": "@hyein-cbio/pi-escalate",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Explicit headless read-only model investigation for Pi, without switching the main model or persisting child transcripts.",
   "type": "module",
   "license": "MIT",

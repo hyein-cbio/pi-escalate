@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import extension from "../src/extension.ts";
 import { EscalatePermission } from "../src/permission.ts";
 
@@ -80,6 +81,34 @@ test("empty arguments, busy sessions, queued input, or missing codemode never di
   assert.equal(h.sent.length, 0);
   assert.equal(h.notices.length, 4);
 });
+
+for (const hasUI of [true, false]) {
+  test(`inactive codemode gives actionable setup guidance without dispatch or permission (hasUI=${hasUI})`, async () => {
+    const h = harness();
+    h.ctx.hasUI = hasUI;
+    h.setActive(["read"]);
+    const expected =
+      `pi-escalate: codemode is inactive. Add "+codemode" to defaultTools in ${join(getAgentDir(), "settings.json")} ` +
+      "(preserving existing entries), then run /reload or restart Pi and retry /escalate. " +
+      "If you start Pi with --tools, include codemode in that list.";
+    if (hasUI) {
+      await h.invoke("Q");
+      assert.deepEqual(h.notices, [expected]);
+    } else {
+      await assert.rejects(h.invoke("Q"), { message: expected });
+      assert.equal(h.notices.length, 0);
+    }
+    assert.equal(h.sent.length, 0);
+    h.emit("before_agent_start", { prompt: "Q" });
+    h.emit("agent_start");
+    await assert.rejects(toolCall(h), /use \/escalate/);
+
+    // Once the user enables codemode, a new explicit command can dispatch normally.
+    h.setActive(["read", "codemode"]);
+    await h.invoke("Q");
+    assert.equal(h.sent.length, 1);
+  });
+}
 
 test("command errors are observable without a UI", async () => {
   const h = harness();

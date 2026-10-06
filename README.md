@@ -28,7 +28,11 @@ Install from npm:
 pi install npm:@hyein-cbio/pi-escalate
 ```
 
-Enable Pi's built-in codemode if it is not already enabled. Add `"+codemode"` to `defaultTools` in your Pi `settings.json`, preserving any existing entries:
+### Required: enable codemode
+
+**Installing this package alone does not enable `/escalate`.** Pi's built-in `codemode` tool must be active; it is off by default unless another integration enables it. `/escalate-set` can still configure the investigator without codemode, but `/escalate` stops with a warning before dispatching any request when codemode is inactive.
+
+Add `"+codemode"` to `defaultTools` in `<Pi agent directory>/settings.json` (normally `~/.pi/agent/settings.json`, or the directory selected by `PI_CODING_AGENT_DIR`). For project-only activation, use the trusted project's `.pi/settings.json` instead. Preserve all existing settings and `defaultTools` entries:
 
 ```json
 {
@@ -36,7 +40,13 @@ Enable Pi's built-in codemode if it is not already enabled. Add `"+codemode"` to
 }
 ```
 
-Reload/restart Pi after installing or enabling codemode. The extension does not activate codemode or change the main tool selection itself.
+Run `/reload` or restart Pi after installing or adding codemode, then retry `/escalate`. The extension does not edit Pi settings, activate codemode, or change the main tool selection itself. This is a **Pi host setting**, separate from the investigator's two settings in `pi-escalate.json`.
+
+If the inactive-codemode warning persists:
+
+- Project `defaultTools` may replace the user-level tool selection or remove codemode with `"-codemode"`; include `"+codemode"` in the effective project list.
+- `--tools` replaces the selection even on reload. Include `codemode` alongside every other desired tool, for example `pi --tools read,bash,edit,write,codemode`. `--no-tools` and `--no-builtin-tools` also override `defaultTools`; remove those overrides if you want settings to control tool selection.
+- If you explicitly disabled `builtin:codemode`, re-enable that built-in extension too. Tool selection cannot activate an extension that was not loaded.
 
 ## Configure: exactly two settings
 

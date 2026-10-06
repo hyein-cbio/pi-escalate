@@ -50,7 +50,11 @@ export default function piEscalate(pi: ExtensionAPI) {
         return fail("pi-escalate: wait for the current work and queued messages to finish, then use /escalate.");
       }
       if (!pi.getActiveTools().includes("codemode")) {
-        return fail("pi-escalate: enable Pi's codemode tool before using /escalate.");
+        return fail(
+          `pi-escalate: codemode is inactive. Add "+codemode" to defaultTools in ${join(getAgentDir(), "settings.json")} ` +
+          "(preserving existing entries), then run /reload or restart Pi and retry /escalate. " +
+          "If you start Pi with --tools, include codemode in that list.",
+        );
       }
       const prompt = [
         `Escalate once: ${args.trim()}`,
