@@ -10,7 +10,7 @@ The minimum host is **Pi 0.99.0** (`@earendil-works/pi-coding-agent`). The boots
 
 Stable future **1.x minor releases are not automatically blacklisted**. This relies on the stable major line's API compatibility plus essential capability checks; it is not a claim that every future release was tested. New 0.x minor lines, 2.x/other major lines, prereleases, and unrecognized version strings need validation before changing this policy. SemVer build metadata is accepted but does not certify a custom fork.
 
-Pi 1.0.0+ is recommended for its smaller codemode prompt footprint. Node.js **22.19+** remains the engine requirement from Pi's published package metadata. The recorded checks used **Node.js 22.23.1** on macOS; the exact Node.js 22.19 floor was not separately rerun.
+Pi 1.0.0+ is recommended for its smaller codemode prompt footprint. Node.js **22.19+** remains the engine requirement from Pi's published package metadata. See [validation](#validation) for the checked environments; the exact Node.js 22.19 floor was not separately rerun.
 
 ## Why 0.99.0
 
@@ -48,23 +48,26 @@ These checks do not change invocation authority, model selection, tools, configu
 
 ## Validation
 
-Validated on Node.js 22.23.1 with published npm packages:
+Verified compatibility for pi-escalate 0.1.3:
+
+Checked on **2026-10-07**, using **Node.js 24.19.0 on Linux** and published npm packages in disposable copies of [commit `8a0d08d10b2e5a4c12cc3a364a32f7197c68f848`](https://github.com/hyein-cbio/pi-escalate/commit/8a0d08d10b2e5a4c12cc3a364a32f7197c68f848) (`package.json` version `0.1.3`). The unmodified checkout passed the type check and **117/117 tests** on each of the three hosts. The results below include this documentation update and one added deterministic regression test, which requires exactly one verification marker matching `package.json` in each document; runtime source and package metadata are unchanged.
 
 | Pi packages | Verification |
 |---|---|
-| 0.87.1 | Actual public bootstrap rejected the host before any registration or request. |
-| 0.99.0 | Type check and all 115 tests passed with every Pi-family dependency pinned to 0.99.0. |
-| 1.0.0 | Type check and all 115 tests passed with every Pi-family dependency pinned to 1.0.0. |
-| 1.0.3 | Type check and all 115 tests passed on the development baseline. |
+| 0.99.0 | Type check and all 118 tests passed with every Pi-family dependency pinned to 0.99.0. |
+| 1.0.0 | Type check and all 118 tests passed with every Pi-family dependency pinned to 1.0.0. |
+| 1.0.3 | Type check and all 118 tests passed with every Pi-family dependency pinned to 1.0.3. |
 | Other stable 0.99.x / 1.x releases | Allowed by runtime policy and subject to capability checks; not all individually tested. |
 
-The complete dependency trees were checked to rule out newer Pi packages contaminating the older-host checks. The 0.87.1 rejection path was tested separately; an unsupported host is not expected to run the investigation suite.
+The complete dependency trees (`npm ls --all`) were checked for all three hosts: `pi-coding-agent`, `pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-tui`, `pi-mcp`, `pi-telemetry`, and `chord` under `@earendil-works` all resolved exclusively to the requested version. No newer Pi packages contaminated the older-host checks.
+
+Earlier **v0.1.2** validation used Node.js 22.23.1 on macOS: the type check and 115/115 tests passed on Pi 0.99.0, 1.0.0, and 1.0.3. It also separately verified that Pi 0.87.1's actual public bootstrap rejected the host before any registration or request. That unsupported-host check was not rerun for v0.1.3; an unsupported host is not expected to run the investigation suite. Neither set of checks separately exercised the exact Node.js 22.19 engine floor.
 
 Tests use the real SDK/extension loader/codemode with local HTTP provider fixtures; no real provider credentials or paid calls are required. Coverage includes permission revocation, unchanged parent model/effort, private child context, native read-only tools, budgets, cancellation, usage, and lazy settings UI. Install `rg` and `fd` (or `fdfind`) before native search tests.
 
 ## Reproduce an exact-version check
 
-Use a disposable **copy** of the checkout, including its source, tests, manifest, and this document. Do not replace the real checkout's dependencies or lockfile. In the disposable copy:
+Use a disposable **copy** of the checkout, including its source, tests, manifest, README, and this document. Do not replace the real checkout's dependencies or lockfile. Keep `package.json`'s release version unchanged when pinning host dependencies so the documentation regression test checks the same release. In the disposable copy:
 
 ```sh
 export VERSION=0.99.0 # also check 1.0.0 and 1.0.3

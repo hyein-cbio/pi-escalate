@@ -12,15 +12,15 @@ Requires a stable **Pi 0.99.x or 1.x** release (`@earendil-works/pi-coding-agent
 
 Pi [0.99.0](https://github.com/earendil-works/pi/releases/tag/v0.99.0) introduced the required built-in codemode, tool exposure, structured tool results, nested execution, and usage-accounting APIs. Pi [1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0) made codemode leaner; it is not the first version that provides these APIs.
 
-Verified compatibility for pi-escalate 0.1.2:
+Verified compatibility for pi-escalate 0.1.3:
 
 | Pi version | Type check | Tests |
 |---|---|---|
-| 0.99.0 | Passed | 115/115 passed |
-| 1.0.0 | Passed | 115/115 passed |
-| 1.0.3 | Passed | 115/115 passed |
+| 0.99.0 | Passed | 118/118 passed |
+| 1.0.0 | Passed | 118/118 passed |
+| 1.0.3 | Passed | 118/118 passed |
 
-The 0.99.0 and 1.0.0 checks ran in isolated installations with every Pi-family dependency pinned to the tested version, including transitive dependencies. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; they do not require paid model calls. Checks used Node.js 22.23.1; the exact Node.js 22.19 engine floor was not separately rerun. The preceding 0.87.1 package lacks the required codemode/tool APIs and was verified to fail clearly before any extension registration or request.
+Checks ran on 2026-10-07 with Node.js 24.19.0 on Linux, in disposable copies with every Pi-family dependency pinned to each tested version, including transitive dependencies. The unmodified v0.1.3 checkout passed 117/117 tests on each host; the table includes the added documentation release-marker regression test. See [validation details](COMPATIBILITY.md#validation) for the source commit and earlier checks. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; they do not require paid model calls. The exact Node.js 22.19 engine floor was not separately rerun. Earlier v0.1.2 validation verified that Pi 0.87.1, which lacks the required codemode/tool APIs, fails clearly before any extension registration or request.
 
 Install from npm:
 

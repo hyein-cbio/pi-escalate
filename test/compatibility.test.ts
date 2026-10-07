@@ -35,6 +35,16 @@ test("host-supplied peers remain wildcard, lockfile agrees, and compatibility do
   assert(pkg.files.includes("COMPATIBILITY.md"));
 });
 
+test("compatibility documents each mark the current package release exactly once", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  for (const file of ["README.md", "COMPATIBILITY.md"]) {
+    const doc = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+    const releases = [...doc.matchAll(/^Verified compatibility for pi-escalate (\S+):$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(releases, [pkg.version], `${file}: verification marker must match package.json`);
+  }
+});
+
 test("public bootstrap rejects missing registration APIs before registering or dispatching anything", async () => {
   let registrations = 0;
   const api = {
