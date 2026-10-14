@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
+import { CombinedAutocompleteProvider } from "@earendil-works/pi-tui";
 import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import extension from "../src/extension.ts";
 import { EscalatePermission } from "../src/permission.ts";
@@ -55,6 +56,74 @@ function start(h: ReturnType<typeof harness>) {
 
 const toolCall = (h: ReturnType<typeof harness>) => h.tools[0].execute("call", { question: "Q" },
   h.ctx.signal, undefined, h.ctx as unknown as Parameters<ToolDefinition["execute"]>[4]);
+
+test("/escalate argument completion offers set and min with English descriptions", async () => {
+  const h = harness();
+  const complete = h.commands.get("escalate")!.getArgumentCompletions!;
+  for (const prefix of ["", " ", "\t"]) {
+    assert.deepEqual(await complete(prefix), [
+      { value: "set", label: "set", description: "Configure the oracle model and thinking level" },
+      { value: "min ", label: "min", description: "Use at most 500 UTF-8 bytes of additional context" },
+    ]);
+  }
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.notices.length, 0);
+  await assert.rejects(toolCall(h), /use \/escalate/);
+});
+
+test("/escalate argument completion filters only matching first-word prefixes", async () => {
+  const h = harness();
+  const complete = h.commands.get("escalate")!.getArgumentCompletions!;
+  for (const prefix of ["s", "se", "set", "  s"]) {
+    assert.deepEqual((await complete(prefix))?.map((item) => item.label), ["set"]);
+  }
+  for (const prefix of ["m", "mi", "min", "  m"]) {
+    assert.deepEqual((await complete(prefix))?.map((item) => item.label), ["min"]);
+  }
+});
+
+test("/escalate argument completion stops after a subcommand or once free-form question text begins", async () => {
+  const h = harness();
+  const complete = h.commands.get("escalate")!.getArgumentCompletions!;
+  for (const prefix of ["set ", "min ", "set\t", "min\n", "min Inspect foo.ts", "set extra",
+    "Inspect src/foo.ts", "minimum", "settings", "s Q", "MIN", "한글 질문"]) {
+    assert.equal(await complete(prefix), null, JSON.stringify(prefix));
+  }
+  await h.invoke("Inspect src/foo.ts");
+  assert.match(h.sent[0].content, /Mode: handoff \(default\)/);
+});
+
+test("Pi's autocomplete provider displays and inserts the subcommands without executing them", async () => {
+  const h = harness();
+  const command = h.commands.get("escalate")!;
+  const provider = new CombinedAutocompleteProvider([{ name: "escalate", ...command }], process.cwd());
+  const options = { signal: new AbortController().signal };
+  const input = "/escalate ";
+  const suggestions = await provider.getSuggestions([input], 0, input.length, options);
+  assert(suggestions);
+  assert.equal(suggestions.prefix, "");
+  assert.deepEqual(suggestions.items.map((item) => item.label), ["set", "min"]);
+  for (const item of suggestions.items) {
+    const applied = provider.applyCompletion([input], 0, input.length, item, suggestions.prefix);
+    const expected = item.label === "set" ? "/escalate set" : "/escalate min ";
+    assert.deepEqual(applied.lines, [expected]);
+    assert.equal(applied.cursorCol, expected.length);
+    if (item.label === "min") {
+      assert.equal(await provider.getSuggestions(applied.lines, 0, applied.cursorCol, options), null);
+    }
+  }
+  for (const text of ["/escalate s", "/escalate m"]) {
+    const filtered = await provider.getSuggestions([text], 0, text.length, options);
+    assert.equal(filtered?.items.length, 1);
+    assert.equal(filtered?.items[0].label, text.endsWith("s") ? "set" : "min");
+  }
+  for (const text of ["/escalate set ", "/escalate min Inspect foo.ts", "/escalate Inspect foo.ts"]) {
+    assert.equal(await provider.getSuggestions([text], 0, text.length, options), null);
+  }
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.notices.length, 0);
+  await assert.rejects(toolCall(h), /use \/escalate/);
+});
 
 test("/escalate dispatches the bounded request without expanding slash commands or adding settings", async () => {
   const h = harness();

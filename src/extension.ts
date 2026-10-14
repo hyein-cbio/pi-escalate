@@ -15,6 +15,16 @@ export default function piEscalate(pi: ExtensionAPI) {
 
   pi.registerCommand("escalate", {
     description: "Investigate with a rich handoff; use min for ≤500-byte context, or set to choose model/thinking.",
+    getArgumentCompletions: (prefix) => {
+      const word = prefix.trimStart();
+      // Complete only the first argument; preserve free-form questions and min's request.
+      if (/\s/.test(word)) return null;
+      const items = [
+        { value: "set", label: "set", description: "Configure the oracle model and thinking level" },
+        { value: "min ", label: "min", description: "Use at most 500 UTF-8 bytes of additional context" },
+      ].filter((item) => item.label.startsWith(word));
+      return items.length ? items : null;
+    },
     handler: async (args, ctx) => {
       assertCommandContext(ctx);
       const fail = (message: string) => {

@@ -1,6 +1,6 @@
 {
   "name": "@hyein-cbio/pi-escalate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Read-only oracle investigations for Pi with rich handoff or 500-byte minimal context, without switching the main model.",
   "type": "module",
   "license": "MIT",

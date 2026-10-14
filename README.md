@@ -12,14 +12,14 @@ Requires a stable **Pi 0.99.x or 1.x** release (`@earendil-works/pi-coding-agent
 
 Pi [0.99.0](https://github.com/earendil-works/pi/releases/tag/v0.99.0) introduced the required built-in codemode, tool exposure, structured tool results, nested execution, and usage-accounting APIs. Pi [1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0) made codemode leaner; it is not the first version that provides these APIs.
 
-Verified compatibility for pi-escalate 0.2.0:
+Verified compatibility for pi-escalate 0.2.1:
 
 | Pi version | Type check | Tests |
 |---|---|---|
-| 1.0.3 | Passed | 159/159 passed |
-| 0.99.0 / 1.0.0 | Allowed by runtime policy | Not rerun for 0.2.0 |
+| 1.0.3 | Passed | 163/163 passed |
+| 0.99.0 / 1.0.0 | Allowed by runtime policy | Not rerun for 0.2.1 |
 
-The 0.2.0 release was checked on 2026-10-14 with Node.js 26.11.1 on macOS using the locally installed Pi 1.0.3 dependency tree. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; no paid model calls are required. Packaging and whitespace checks also passed. This is not a full exact-version compatibility-matrix run, and the Node.js 22.19 engine floor was not separately exercised. See [validation details and historical results](COMPATIBILITY.md#validation).
+The 0.2.1 release was checked on 2026-10-14 with Node.js 26.11.1 on macOS using the locally installed Pi 1.0.3 dependency tree. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; no paid model calls are required. Packaging and whitespace checks also passed. This is not a full exact-version compatibility-matrix run, and the Node.js 22.19 engine floor was not separately exercised. See [validation details and historical results](COMPATIBILITY.md#validation).
 
 Install from npm:
 
@@ -56,6 +56,15 @@ If the inactive-codemode warning persists:
 ```
 
 Only the exact first words `set` and `min` are reserved subcommands. `/escalate set` accepts no extra arguments; investigation commands require a nonempty request. The old `/escalate-set` command is removed, not retained as an alias.
+
+In the interactive TUI, type `/escalate ` (including the space) to see English argument-completion suggestions:
+
+```text
+set   Configure the oracle model and thinking level
+min   Use at most 500 UTF-8 bytes of additional context
+```
+
+`/escalate s` suggests `set`; `/escalate m` suggests `min`. Selecting `min` inserts a trailing space so you can immediately type the request. Suggestions stop after a subcommand followed by whitespace or when the input no longer matches a subcommand prefix. You can ignore the suggestions and type a free-form question to use the default handoff mode; no `default` subcommand is needed. Completion itself never opens settings, dispatches a request, or grants investigation permission.
 
 ## Configure: session settings and saved defaults
 

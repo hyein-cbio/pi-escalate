@@ -48,13 +48,13 @@ Both `/escalate <request>` (handoff) and `/escalate min <request>` authorize one
 
 ## Validation
 
-Verified compatibility for pi-escalate 0.2.0:
+Verified compatibility for pi-escalate 0.2.1:
 
-Checked on **2026-10-14**, using **Node.js 26.11.1 on macOS** and the locally installed Pi **1.0.3** dependency tree. The type check, all **159/159 tests**, package dry-run, and whitespace checks passed. Coverage includes handoff/min preparation, the 500-byte UTF-8 limit, original-question enforcement, session-only settings and lifecycle isolation, Enter/Ctrl+S, save failures, and once-only start notifications, as well as the existing investigation boundaries and budgets.
+Checked on **2026-10-14**, using **Node.js 26.11.1 on macOS** and the locally installed Pi **1.0.3** dependency tree. The type check, all **163/163 tests**, package dry-run, and whitespace checks passed. Coverage includes English argument-completion suggestions and insertion through Pi's autocomplete provider, handoff/min preparation, the 500-byte UTF-8 limit, original-question enforcement, session-only settings and lifecycle isolation, Enter/Ctrl+S, save failures, and once-only start notifications, as well as the existing investigation boundaries and budgets.
 
-| Pi packages | Verification for 0.2.0 |
+| Pi packages | Verification for 0.2.1 |
 |---|---|
-| 1.0.3 | Local type check and all 159 tests passed. |
+| 1.0.3 | Local type check and all 163 tests passed. |
 | 0.99.0 / 1.0.0 | Allowed by runtime policy; not rerun for this release. |
 | Other stable 0.99.x / 1.x releases | Allowed by runtime policy and subject to capability checks; not individually tested. |
 
