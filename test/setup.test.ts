@@ -3,12 +3,12 @@ import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, type SelectItem } from "@earendil-works/pi-tui";
 import { readOptionalConfig, writeConfig } from "../src/config.ts";
 import extension from "../src/extension.ts";
-import { availableTargets, configureEscalation, SetupPicker } from "../src/setup.ts";
+import { availableTargets, configureEscalation, SetupPicker, type PickerSelection } from "../src/setup.ts";
 
 const keys = new KeybindingsManager(TUI_KEYBINDINGS);
 const theme = { fg: (_color: unknown, text: string) => text, bold: (text: string) => text } as Pick<Theme, "fg" | "bold">;
@@ -26,18 +26,35 @@ async function fixture(actions: Array<(picker: SetupPicker) => void>, models: Mo
   const tools: ToolDefinition[] = [];
   const notices: string[] = [];
   const screens: string[][] = [];
+  const hooks = new Map<string, (event: { text?: string; prompt?: string }, ctx: ExtensionCommandContext) => void>();
+  const prompts: string[] = [];
+  const targetCalls: Array<{ model: Model<Api>; context: Context; options?: SimpleStreamOptions }> = [];
   let calls = 0;
   let sessionId = "main";
   let idle = true;
   let queued = false;
   const selectedMain = { ...base, id: "sol" };
   const ctx = {
-    mode: "tui", hasUI: true, model: selectedMain, thinkingLevel: "low",
+    mode: "tui", hasUI: true, model: selectedMain, thinkingLevel: "low", cwd: dir,
+    signal: new AbortController().signal,
     isIdle: () => idle, hasPendingMessages: () => queued,
     sessionManager: { getSessionId: () => sessionId },
     modelRegistry: {
       getAvailable: () => models,
+      find: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
       hasConfiguredAuth: (model: Model<Api>) => model.id !== "no-auth",
+      streamSimple: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
+        targetCalls.push({ model, context, options });
+        const stream = createAssistantMessageEventStream();
+        stream.push({ type: "done", reason: "stop", message: {
+          role: "assistant", content: [{ type: "text", text: "Report." }], api: model.api, provider: model.provider, model: model.id,
+          stopReason: "stop", timestamp: Date.now(), usage: {
+            input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        } });
+        return stream;
+      },
     },
     ui: {
       notify: (message: string) => notices.push(message),
@@ -56,19 +73,33 @@ async function fixture(actions: Array<(picker: SetupPicker) => void>, models: Mo
   extension({
     registerCommand: (name: string, command: Command) => commands.set(name, command),
     registerTool: (tool: ToolDefinition) => tools.push(tool),
-    on: () => () => {},
+    on: (name: string, handler: (event: { text?: string; prompt?: string }, ctx: ExtensionCommandContext) => void) => {
+      hooks.set(name, handler); return () => {};
+    },
     getActiveTools: () => ["codemode"],
-    sendUserMessage: () => { sent++; },
+    sendUserMessage: (prompt: string) => { sent++; prompts.push(prompt); },
   } as unknown as ExtensionAPI);
   const prior = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   return {
-    dir, file, ctx, selectedMain, commands, tools, notices, screens,
+    dir, file, ctx, selectedMain, commands, tools, notices, screens, targetCalls,
     calls: () => calls, sent: () => sent,
+    emit: (name: string) => hooks.get(name)!( {}, ctx),
+    investigate: async (args = "Q", context?: string) => {
+      await commands.get("escalate")!.handler(args, ctx);
+      const prompt = prompts.at(-1)!;
+      hooks.get("input")!({ text: prompt }, ctx);
+      hooks.get("before_agent_start")!({ prompt }, ctx);
+      hooks.get("agent_start")!({}, ctx);
+      try {
+        return await tools[0].execute("call", { question: "Prepared Q", context }, ctx.signal, undefined,
+          ctx as unknown as Parameters<ToolDefinition["execute"]>[4]);
+      } finally { hooks.get("agent_end")!({}, ctx); }
+    },
     setIdle: (value: boolean) => { idle = value; },
     setQueued: (value: boolean) => { queued = value; },
     setSession: (value: string) => { sessionId = value; },
-    invoke: (args = "") => commands.get("escalate-set")!.handler(args, ctx),
+    invoke: (args = "") => commands.get("escalate")!.handler(`set ${args}`.trim(), ctx),
     dispose: async () => {
       if (prior === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = prior;
@@ -79,9 +110,14 @@ async function fixture(actions: Array<(picker: SetupPicker) => void>, models: Mo
 
 const enter = (picker: SetupPicker) => picker.handleInput("\r");
 const cancel = (picker: SetupPicker) => picker.handleInput("\x1b");
+const save = (picker: SetupPicker) => picker.handleInput("\x13");
+const choose = (value: string, persist = false) => (picker: SetupPicker) => {
+  picker.handleInput(value);
+  (persist ? save : enter)(picker);
+};
 
 function picker(items: SelectItem[], initial?: string, customKeys = keys) {
-  const values: Array<string | undefined> = [];
+  const values: Array<PickerSelection | undefined> = [];
   let renders = 0;
   const component = new SetupPicker("Escalate 설정 🙂", items, initial, theme, customKeys,
     (value) => values.push(value), () => { renders++; });
@@ -101,7 +137,7 @@ test("native TUI picker preselects saved model, navigates, filters by substring/
   assert(!f.component.render(80).some((line) => line.includes("provider/alpha")));
   enter(f.component);
   enter(f.component);
-  assert.deepEqual(f.values, ["provider/astra"]);
+  assert.deepEqual(f.values, [{ value: "provider/astra", save: false }]);
   assert(f.renders() > 0);
 });
 
@@ -126,7 +162,7 @@ test("picker propagates focus/cursor, respects remapped selection keys, and fits
   }
   f.component.invalidate();
   f.component.handleInput("\x13");
-  assert.deepEqual(f.values, ["한글/🙂"]);
+  assert.deepEqual(f.values, [{ value: "한글/🙂", save: true }]);
   f.component.focused = false;
   assert.equal(f.component.focused, false);
 });
@@ -140,8 +176,8 @@ test("available models are authenticated, physical, sorted, and deduplicated", a
   finally { await f.dispose(); }
 });
 
-test("/escalate-set creates exactly two settings after both choices; no model call, main mutation, or authorization", async () => {
-  const f = await fixture([enter, enter]);
+test("/escalate set Ctrl+S saves exactly two settings after both choices; no model call, main mutation, or authorization", async () => {
+  const f = await fixture([enter, save]);
   try {
     await f.invoke();
     assert.deepEqual(JSON.parse(await readFile(f.file, "utf8")), { model: "fixture/astra", reasoningLevel: "high" });
@@ -193,7 +229,7 @@ test("saved values are highlighted and non-reasoning models offer only off", asy
 
 test("models with a restricted effort map offer only supported choices", async () => {
   const restricted = { ...base, thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, xhigh: null, max: null } };
-  const f = await fixture([enter, enter], [restricted]);
+  const f = await fixture([enter, save], [restricted]);
   try {
     await f.invoke();
     assert(f.screens[1].some((line) => line.startsWith("→ high")));
@@ -203,7 +239,7 @@ test("models with a restricted effort map offer only supported choices", async (
 });
 
 test("invalid settings are preserved on cancel and can be replaced by deliberate selections", async () => {
-  const f = await fixture([cancel, enter, enter]);
+  const f = await fixture([cancel, enter, save]);
   try {
     await writeFile(f.file, "invalid private content");
     await f.invoke();
@@ -240,7 +276,7 @@ test("setup surfaces its own diagnostic errors but sanitizes unrelated exception
     try {
       await f.invoke();
       assert.equal(f.notices.at(-1), message.startsWith("pi-escalate:") ? message :
-        "pi-escalate: settings could not be saved. Check configuration directory permissions.");
+        "pi-escalate: settings could not be applied or saved. Check configuration directory permissions.");
       assert.deepEqual(await readdir(f.dir), []);
     } finally { await f.dispose(); }
   }
@@ -285,10 +321,125 @@ for (const change of ["session", "busy", "availability"] as const) {
     try {
       await f.invoke();
       assert.deepEqual(await readdir(f.dir), []);
-      assert(f.notices.some((notice) => notice.includes("not saved")));
+      assert(f.notices.some((notice) => notice.includes("not applied or saved")));
     } finally { await f.dispose(); }
   });
 }
+
+test("Enter applies a first-time session setting without creating config; actual calls and start notices use it", async () => {
+  const f = await fixture([enter, choose("low")]);
+  try {
+    await f.invoke();
+    assert.deepEqual(await readdir(f.dir), []);
+    const result = await f.investigate("min Original request", "Assessment: likely safe.");
+    assert.equal(result.isError, undefined);
+    assert.equal(f.targetCalls[0].options?.reasoning, "low");
+    const user = f.targetCalls[0].context.messages.find((message) => message.role === "user");
+    assert(user && user.role === "user" && Array.isArray(user.content));
+    assert.deepEqual(JSON.parse((user.content[0] as { text: string }).text),
+      { question: "Original request", context: "Assessment: likely safe." });
+    assert(f.notices.includes("pi-escalate: investigating with fixture/astra · thinking low"));
+    assert.equal(f.ctx.model, f.selectedMain);
+    assert.equal(f.ctx.thinkingLevel, "low");
+    assert.deepEqual(await readdir(f.dir), []);
+  } finally { await f.dispose(); }
+});
+
+test("session override wins over saved config, is highlighted, survives tree navigation/cancel, and resets on session start", async () => {
+  const f = await fixture([choose("alternate"), enter, enter, cancel], [base, { ...base, id: "alternate", reasoning: false }]);
+  try {
+    const original = '{ "model": "fixture/astra", "reasoningLevel": "low" }\n';
+    await writeFile(f.file, original);
+    await f.invoke();
+    await f.investigate("Q", "Handoff: " + "x".repeat(600));
+    assert.equal(f.targetCalls.at(-1)?.model.id, "alternate");
+    assert.equal(f.targetCalls.at(-1)?.options?.reasoning, undefined);
+    assert(f.notices.includes("pi-escalate: investigating with fixture/alternate · thinking off"));
+    await f.invoke(); // The current alternate/off setting is preselected; cancel step 2.
+    assert(f.screens[2].some((line) => line.startsWith("→ fixture/alternate") && line.includes("current")));
+    assert(f.screens[2].some((line) => line.includes("fixture/astra") && line.includes("saved")));
+    f.emit("session_tree");
+    await f.investigate();
+    assert.equal(f.targetCalls.at(-1)?.model.id, "alternate");
+    assert.equal(await readFile(f.file, "utf8"), original);
+    f.emit("session_start");
+    await f.investigate();
+    assert.equal(f.targetCalls.at(-1)?.model.id, "astra");
+    assert.equal(f.targetCalls.at(-1)?.options?.reasoning, "low");
+  } finally { await f.dispose(); }
+});
+
+for (const event of ["session_start", "session_shutdown", "changed-id"]) {
+  test("temporary settings do not leak after " + event, async () => {
+    const f = await fixture([enter, enter]);
+    try {
+      await f.invoke();
+      if (event === "changed-id") f.setSession("other");
+      else f.emit(event);
+      await assert.rejects(f.investigate(), /use \/escalate set/);
+      assert.equal(f.targetCalls.length, 0);
+      assert(!f.notices.some((notice) => notice.includes("investigating with")));
+    } finally { await f.dispose(); }
+  });
+}
+
+for (const actions of [[save, enter], [enter, save]]) {
+  test("Ctrl+S at either step commits both choices and applies the saved value to this session", async () => {
+    const f = await fixture(actions);
+    try {
+      await f.invoke();
+      assert.deepEqual(await readOptionalConfig(f.file), { model: "fixture/astra", reasoningLevel: "high" });
+      await f.investigate();
+      assert.equal(f.targetCalls[0].options?.reasoning, "high");
+      if (actions[0] === save) assert(f.screens[1].some((line) => line.includes("apply + save")));
+    } finally { await f.dispose(); }
+  });
+}
+
+test("Ctrl+S on the first screen followed by Escape commits nothing", async () => {
+  const f = await fixture([save, cancel]);
+  try {
+    await f.invoke();
+    assert.deepEqual(await readdir(f.dir), []);
+    await assert.rejects(f.investigate(), /use \/escalate set/);
+    assert.equal(f.targetCalls.length, 0);
+  } finally { await f.dispose(); }
+});
+
+test("Enter can override invalid saved config without modifying it", async () => {
+  const f = await fixture([enter, enter]);
+  try {
+    await writeFile(f.file, "invalid private content");
+    await f.invoke();
+    await f.investigate();
+    assert.equal(f.targetCalls.length, 1);
+    assert.equal(await readFile(f.file, "utf8"), "invalid private content");
+    assert(!f.notices.some((notice) => notice.includes("private content")));
+  } finally { await f.dispose(); }
+});
+
+test("failed config save leaves the previous session setting active", async () => {
+  const f = await fixture([enter, enter, enter, choose("low", true)]);
+  try {
+    await f.invoke();
+    await mkdir(f.file); // Deliberately make the config destination unwritable as a file.
+    await f.invoke();
+    assert(f.notices.some((notice) => notice.includes("could not be applied or saved")));
+    await f.investigate();
+    assert.equal(f.targetCalls[0].options?.reasoning, "high");
+  } finally { await f.dispose(); }
+});
+
+test("session lifecycle change with the same id while settings are open prevents apply and save", async () => {
+  let f: Awaited<ReturnType<typeof fixture>>;
+  f = await fixture([enter, (picker) => { f.emit("session_start"); save(picker); }]);
+  try {
+    await f.invoke();
+    assert.deepEqual(await readdir(f.dir), []);
+    assert(f.notices.some((notice) => notice.includes("not applied or saved")));
+    await assert.rejects(f.investigate(), /use \/escalate set/);
+  } finally { await f.dispose(); }
+});
 
 test("atomic writer creates missing parent directories and cleans staging files on rename failure", async () => {
   const f = await fixture([]);

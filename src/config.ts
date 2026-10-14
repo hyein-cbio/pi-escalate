@@ -52,7 +52,7 @@ export async function readOptionalConfig(path: string): Promise<EscalateConfig |
 export async function readConfig(path: string): Promise<EscalateConfig> {
   const config = await readOptionalConfig(path);
   if (!config) {
-    throw new Error("pi-escalate: use /escalate-set or create <Pi agent directory>/pi-escalate.json with model and reasoningLevel.");
+    throw new Error("pi-escalate: use /escalate set or create <Pi agent directory>/pi-escalate.json with model and reasoningLevel.");
   }
   return config;
 }

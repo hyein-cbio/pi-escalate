@@ -17,6 +17,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const REFERENCE = "PRIVATE-REFERENCE:" + "x".repeat(20_000);
 const PRIVATE_THINKING = "PRIVATE-TARGET-THINKING";
 const ANSWER = "The race is between the read and write.";
+const MIN_REFERENCE = "MIN-REFERENCE:" + "가".repeat(162); // Exactly 500 UTF-8 bytes.
 
 interface RequestBody {
   model: string;
@@ -36,22 +37,28 @@ function sendAnswer(res: ServerResponse, model: string, delta: object, finish = 
   res.end("data: [DONE]\n\n");
 }
 
-async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice = false, configureFirst = false, investigate = false) {
+async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice = false, configureFirst = false, investigate = false, showUI = true, mode: "handoff" | "min" = "handoff", sessionOnly = false) {
+  const thinking = sessionOnly ? "low" : "high";
+  const startNotice = `pi-escalate: investigating with fixture/astra · thinking ${thinking}`;
   const dir = await mkdtemp(join(tmpdir(), "pi-escalate-integration-"));
   const cwd = join(dir, "workspace");
   const agentDir = join(dir, "agent");
   await mkdir(cwd);
   await mkdir(agentDir);
   await writeFile(join(cwd, "reference.txt"), REFERENCE);
-  await writeFile(join(agentDir, "pi-escalate.json"), JSON.stringify({
-    model: "fixture/astra", reasoningLevel: "high",
-  }));
+  if (!sessionOnly) {
+    await writeFile(join(agentDir, "pi-escalate.json"), JSON.stringify({
+      model: "fixture/astra", reasoningLevel: "high",
+    }));
+  }
   const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
   const requests: RequestBody[] = [];
+  const notices: Array<{ message: string; type: string }> = [];
   const script = [
-    'const context = await tools.read({ path: "reference.txt" });',
+    mode === "min" ? `const context = ${JSON.stringify(MIN_REFERENCE)};` :
+      'const context = await tools.read({ path: "reference.txt" });',
     'const result = await tools.escalate({ question: "Where is the race?", context });',
     'text(result.answer);',
     ...(attemptTwice ? [
@@ -69,6 +76,7 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
       const request = JSON.parse(body) as RequestBody;
       requests.push(request);
       if (request.model === "astra") {
+        assert.deepEqual(notices, showUI || configureFirst ? [{ message: startNotice, type: "info" }] : []);
         if (targetFails) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: REFERENCE + " PRIVATE-KEY", type: "invalid_request_error" } }));
@@ -142,7 +150,7 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
     const commandErrors: string[] = [];
     let settingScreens = 0;
     const uiContext = {
-      notify: () => {},
+      notify: (message: string, type: string) => notices.push({ message, type }),
       custom: async (factory: (tui: TUI, theme: Theme, keys: KeybindingsManager,
         done: (value: unknown) => void) => Component) => {
         const theme = { fg: (_color: unknown, text: string) => text, bold: (text: string) => text } as Theme;
@@ -152,25 +160,28 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
           new KeybindingsManager(TUI_KEYBINDINGS), done);
         assert(picker.render(80).some((line) => line.includes("Escalate settings")));
         settingScreens++;
-        picker.handleInput!("\r");
+        if (settingScreens === 2 && sessionOnly) picker.handleInput!("low");
+        picker.handleInput!(settingScreens === 2 && !sessionOnly ? "\x13" : "\r");
         return result;
       },
     } as unknown as ExtensionUIContext;
-    await session.bindExtensions(configureFirst ? {
+    await session.bindExtensions(configureFirst || showUI ? {
       mode: "tui", uiContext, onError: (error) => commandErrors.push(error.error),
     } : {});
     if (configureFirst) {
       const mainModel = session.model;
       const mainThinking = session.thinkingLevel;
       const messages = JSON.stringify(session.messages);
-      await session.prompt("/escalate-set");
+      await session.prompt("/escalate set");
       assert.deepEqual(commandErrors, []);
       assert.equal(settingScreens, 2);
       assert.equal(session.model, mainModel);
       assert.equal(session.thinkingLevel, mainThinking);
       assert.equal(JSON.stringify(session.messages), messages);
       assert.equal(requests.length, 0);
+      if (sessionOnly) assert(!(await readdir(agentDir)).includes("pi-escalate.json"));
     }
+    notices.length = 0;
     const beforeFiles = (await readdir(dir, { recursive: true })).sort();
     const selectedModel = session.model;
     const selectedThinking = session.thinkingLevel;
@@ -180,10 +191,12 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
         if (event.type === "agent_settled") { unsubscribe(); resolve(); }
       });
     });
-    await session.prompt((invokeCommand ? "/escalate " : "") + "MAIN-PRIVATE-HISTORY: investigate the race.");
+    const userRequest = mode === "min" ? "Inspect reference.txt for a race." : "MAIN-PRIVATE-HISTORY: investigate the race.";
+    await session.prompt((invokeCommand ? `/escalate ${mode === "min" ? "min " : ""}` : "") + userRequest);
     // Slash commands dispatch a new run through sendUserMessage; await its final settlement.
     await settled;
 
+    assert.deepEqual(notices, invokeCommand && (showUI || configureFirst) ? [{ message: startNotice, type: "info" }] : []);
     assert.equal(session.getLastAssistantText(), "Done.");
     assert.equal(session.model, selectedModel);
     assert.equal(session.thinkingLevel, selectedThinking);
@@ -194,17 +207,30 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
     const target = requests.filter((request) => request.model === "astra");
     assert.equal(target.length, invokeCommand ? (investigate && !targetFails ? 2 : 1) : 0);
     for (const request of target) {
-      assert.equal(request.reasoning_effort, "high");
+      assert.equal(request.reasoning_effort, thinking);
       assert.deepEqual(request.tools?.map((tool) => tool.function?.name), ["read", "grep", "find", "ls"]);
       assert(!JSON.stringify(request).includes("MAIN-PRIVATE-HISTORY"));
       assert.equal(request.messages.filter((message) => message.role === "user").length, 1);
     }
-    if (invokeCommand) assert(JSON.stringify(target[0]).includes("PRIVATE-REFERENCE"));
+    if (invokeCommand) {
+      assert(JSON.stringify(target[0]).includes(mode === "min" ? MIN_REFERENCE : "PRIVATE-REFERENCE"));
+      if (mode === "min") {
+        assert.equal(Buffer.byteLength(MIN_REFERENCE, "utf8"), 500);
+        const user = target[0].messages.find((message) => message.role === "user");
+        assert(user);
+        const content = typeof user.content === "string" ? user.content :
+          (user.content as Array<{ type: string; text: string }>).map((part) => {
+            assert.equal(part.type, "text"); return part.text;
+          }).join("");
+        assert.deepEqual(JSON.parse(content), { question: userRequest, context: MIN_REFERENCE });
+      }
+    }
 
     const parents = requests.filter((request) => request.model === "sol");
     assert.equal(parents.length, 2);
     assert(!parents[0].tools?.some((tool) => tool.function?.name === "escalate"));
     const continuation = JSON.stringify(parents[1]);
+    assert(!JSON.stringify(requests).includes(startNotice));
     assert(!continuation.includes("PRIVATE-REFERENCE"));
     assert(!continuation.includes(PRIVATE_THINKING));
     assert(!continuation.includes("PRIVATE-INTERMEDIATE"));
@@ -213,6 +239,7 @@ async function scenario(targetFails: boolean, invokeCommand = true, attemptTwice
     const toolResult = session.messages.find((message) => message.role === "toolResult");
     assert(toolResult && toolResult.role === "toolResult");
     const parentTranscript = JSON.stringify(session.messages);
+    assert(!parentTranscript.includes(startNotice));
     // Pi retains bounded argument previews as UI metadata, not model context.
     assert(!parentTranscript.includes(REFERENCE));
     const details = toolResult.details as { calls: Array<{ args: string }> };
@@ -255,3 +282,9 @@ test("real Pi loader + settings TUI: lazy UI loads, saves without model calls or
   { timeout: 30_000 }, () => scenario(false, false, false, true));
 test("real Pi + codemode + HTTP: Astra investigates with four native tools; only its final answer reaches Sol",
   { timeout: 30_000 }, () => scenario(false, true, false, false, true));
+test("real Pi + codemode + HTTP: headless investigation emits no start notification",
+  { timeout: 30_000 }, () => scenario(false, true, false, false, true, false));
+test("real Pi + codemode + HTTP: /escalate min injects exactly 500 UTF-8 bytes and uses the original question",
+  { timeout: 30_000 }, () => scenario(false, true, false, false, true, true, "min"));
+test("real Pi + settings TUI + HTTP: Enter uses session-only model/thinking without creating config or parent context",
+  { timeout: 30_000 }, () => scenario(false, true, false, true, true, true, "handoff", true));

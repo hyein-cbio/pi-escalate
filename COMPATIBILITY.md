@@ -42,13 +42,25 @@ The public `src/index.ts` is an asynchronous bootstrap. It imports the host name
 
 A constructor-only Agent probe checks that the required hooks are retained. It starts no model request, creates no session, and subscribes to nothing. Keeping hook fields is a useful diagnostic, not proof of behavioral correctness; the budget and usage tests remain essential.
 
-Commands validate essential context methods. Run-signal validation happens only when an explicit escalation grant is active, not on ordinary parent runs. Missing registry streaming is diagnosed before lookup/auth/requests and outside the generic provider-error sanitization path. TUI checks happen only when `/escalate-set` opens settings.
+Commands validate essential context methods. Run-signal validation happens only when an explicit escalation grant is active, not on ordinary parent runs. Missing registry streaming is diagnosed before lookup/auth/requests and outside the generic provider-error sanitization path. TUI checks happen only when `/escalate set` opens settings.
 
-These checks do not change invocation authority, model selection, tools, configuration, or transcript policy. `/escalate` still authorizes one read-only investigation; there are still only two configurable values.
+Both `/escalate <request>` (handoff) and `/escalate min <request>` authorize one read-only investigation; `/escalate set` grants none. There are still only two persistent configuration values. Enter applies a session-only override, while Ctrl+S also saves those defaults.
 
 ## Validation
 
-Verified compatibility for pi-escalate 0.1.3:
+Verified compatibility for pi-escalate 0.2.0:
+
+Checked on **2026-10-14**, using **Node.js 26.11.1 on macOS** and the locally installed Pi **1.0.3** dependency tree. The type check, all **159/159 tests**, package dry-run, and whitespace checks passed. Coverage includes handoff/min preparation, the 500-byte UTF-8 limit, original-question enforcement, session-only settings and lifecycle isolation, Enter/Ctrl+S, save failures, and once-only start notifications, as well as the existing investigation boundaries and budgets.
+
+| Pi packages | Verification for 0.2.0 |
+|---|---|
+| 1.0.3 | Local type check and all 159 tests passed. |
+| 0.99.0 / 1.0.0 | Allowed by runtime policy; not rerun for this release. |
+| Other stable 0.99.x / 1.x releases | Allowed by runtime policy and subject to capability checks; not individually tested. |
+
+This release was not rerun in disposable copies with every transitive Pi package pinned. The exact Node.js 22.19 engine floor was not separately exercised.
+
+### Historical v0.1.3 validation
 
 Checked on **2026-10-07**, using **Node.js 24.19.0 on Linux** and published npm packages in disposable copies of [commit `8a0d08d10b2e5a4c12cc3a364a32f7197c68f848`](https://github.com/hyein-cbio/pi-escalate/commit/8a0d08d10b2e5a4c12cc3a364a32f7197c68f848) (`package.json` version `0.1.3`). The unmodified checkout passed the type check and **117/117 tests** on each of the three hosts. The results below include this documentation update and one added deterministic regression test, which requires exactly one verification marker matching `package.json` in each document; runtime source and package metadata are unchanged.
 
@@ -59,7 +71,9 @@ Checked on **2026-10-07**, using **Node.js 24.19.0 on Linux** and published npm 
 | 1.0.3 | Type check and all 118 tests passed with every Pi-family dependency pinned to 1.0.3. |
 | Other stable 0.99.x / 1.x releases | Allowed by runtime policy and subject to capability checks; not all individually tested. |
 
-The complete dependency trees (`npm ls --all`) were checked for all three hosts: `pi-coding-agent`, `pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-tui`, `pi-mcp`, `pi-telemetry`, and `chord` under `@earendil-works` all resolved exclusively to the requested version. No newer Pi packages contaminated the older-host checks.
+This historical matrix applies to the published v0.1.3 baseline, not the v0.2.0 handoff/min and session-only settings changes. See the current release's validation above.
+
+For that historical run, the complete dependency trees (`npm ls --all`) were checked for all three hosts: `pi-coding-agent`, `pi-agent-core`, `pi-ai`, `pi-codemode`, `pi-tui`, `pi-mcp`, `pi-telemetry`, and `chord` under `@earendil-works` all resolved exclusively to the requested version. No newer Pi packages contaminated the older-host checks.
 
 Earlier **v0.1.2** validation used Node.js 22.23.1 on macOS: the type check and 115/115 tests passed on Pi 0.99.0, 1.0.0, and 1.0.3. It also separately verified that Pi 0.87.1's actual public bootstrap rejected the host before any registration or request. That unsupported-host check was not rerun for v0.1.3; an unsupported host is not expected to run the investigation suite. Neither set of checks separately exercised the exact Node.js 22.19 engine floor.
 

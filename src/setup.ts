@@ -5,6 +5,8 @@ import type { Component, Focusable, KeybindingsManager, SelectItem, SelectList }
 import { readOptionalConfig, writeConfig, type EscalateConfig } from "./config.ts";
 import { assertFunctions, assertRegistry } from "./compatibility.ts";
 
+export interface PickerSelection { value: string; save: boolean }
+
 /** Searchable picker composed from Pi's native input and selection components. */
 export class SetupPicker implements Component, Focusable {
   private readonly search = new tuiApi.Input({ prompt: "Search: ", placeholder: "type to filter" });
@@ -18,9 +20,10 @@ export class SetupPicker implements Component, Focusable {
     private readonly initial: string | undefined,
     private readonly theme: Pick<Theme, "fg" | "bold">,
     private readonly keys: KeybindingsManager,
-    private readonly done: (value: string | undefined) => void,
+    private readonly done: (value: PickerSelection | undefined) => void,
     private readonly requestRender: () => void,
-    private readonly saves = false,
+    private readonly finalStep = false,
+    private readonly saveRequested = false,
   ) {
     assertFunctions(keys, ["matches", "getKeys"], "keybindings");
     assertFunctions(theme, ["fg", "bold"], "theme");
@@ -47,7 +50,7 @@ export class SetupPicker implements Component, Focusable {
     }
   }
 
-  private finish(value: string | undefined): void {
+  private finish(value: PickerSelection | undefined): void {
     if (this.closed) return;
     this.closed = true;
     this.done(value);
@@ -56,9 +59,10 @@ export class SetupPicker implements Component, Focusable {
   handleInput(data: string): void {
     if (this.closed) return;
     if (this.keys.matches(data, "tui.select.cancel")) return this.finish(undefined);
-    if (this.keys.matches(data, "tui.select.confirm")) {
+    const save = tuiApi.matchesKey(data, tuiApi.Key.ctrl("s"));
+    if (save || this.keys.matches(data, "tui.select.confirm")) {
       const item = this.list.getSelectedItem();
-      if (item) this.finish(item.value);
+      if (item) this.finish({ value: item.value, save });
       return;
     }
     const direction = this.keys.matches(data, "tui.select.up") ? -1 :
@@ -90,7 +94,9 @@ export class SetupPicker implements Component, Focusable {
       "",
       ...(this.filtered.length ? this.list.render(width) : [this.theme.fg("warning", "No matching options")]),
       "",
-      this.theme.fg("dim", `${confirm} ${this.saves ? "save" : "select"} · ${cancel} cancel · type to search`),
+      this.theme.fg("dim", this.finalStep ?
+        `${confirm} ${this.saveRequested ? "apply + save" : "apply (session only)"} · ctrl+s apply + save · ${cancel} cancel` :
+        `${confirm} next · ctrl+s next + save after step 2 · ${cancel} cancel`),
     ].map((line) => tuiApi.truncateToWidth(line, width));
   }
 }
@@ -106,17 +112,20 @@ export function availableTargets(ctx: Pick<ExtensionCommandContext, "modelRegist
 }
 
 async function pick(
-  ctx: ExtensionCommandContext, title: string, items: SelectItem[], initial?: string, saves = false,
-): Promise<string | undefined> {
-  return ctx.ui.custom<string | undefined>((tui, theme, keys, done) => {
+  ctx: ExtensionCommandContext, title: string, items: SelectItem[], initial?: string, finalStep = false, saveRequested = false,
+): Promise<PickerSelection | undefined> {
+  return ctx.ui.custom<PickerSelection | undefined>((tui, theme, keys, done) => {
     assertFunctions(tui, ["requestRender"], "TUI");
-    return new SetupPicker(title, items, initial, theme, keys, done, () => tui.requestRender(), saves);
+    return new SetupPicker(title, items, initial, theme, keys, done, () => tui.requestRender(), finalStep, saveRequested);
   });
 }
 
-export async function configureEscalation(ctx: ExtensionCommandContext, path: string): Promise<void> {
+export async function configureEscalation(
+  ctx: ExtensionCommandContext, path: string, active?: EscalateConfig, isCurrent = () => true,
+): Promise<EscalateConfig | undefined> {
   // TUI dependencies are checked only on the settings path, never during headless work.
-  assertFunctions(tuiApi, ["Input", "SelectList", "truncateToWidth"], "pi-tui");
+  assertFunctions(tuiApi, ["Input", "SelectList", "truncateToWidth", "matchesKey"], "pi-tui");
+  assertFunctions(tuiApi.Key, ["ctrl"], "pi-tui.Key");
   assertFunctions(ctx.ui, ["custom", "notify"], "UI");
   assertRegistry(ctx.modelRegistry, true);
   const models = availableTargets(ctx);
@@ -129,34 +138,45 @@ export async function configureEscalation(ctx: ExtensionCommandContext, path: st
   try {
     previous = await readOptionalConfig(path);
   } catch {
-    ctx.ui.notify("pi-escalate: existing settings are unreadable or invalid. Confirming both selections will replace them.", "warning");
+    ctx.ui.notify("pi-escalate: saved settings are unreadable or invalid. Enter applies session-only; Ctrl+S replaces the config after both selections.", "warning");
   }
-  const slug = await pick(ctx, "Escalate settings · 1/2 · Target model", models.map((model) => {
+  const effective = active ?? previous;
+  const target = await pick(ctx, "Escalate settings · 1/2 · Target model", models.map((model) => {
     const value = `${model.provider}/${model.id}`;
-    return { value, label: value, description: model.name + (value === previous?.model ? " (saved)" : "") };
-  }), previous?.model);
-  if (slug === undefined) return;
+    return { value, label: value, description: model.name +
+      (value === effective?.model ? " (current)" : "") + (value === previous?.model ? " (saved)" : "") };
+  }), effective?.model);
+  if (target === undefined) return;
+  const slug = target.value;
   const model = models.find((item) => `${item.provider}/${item.id}` === slug);
   if (!model) throw new Error("pi-escalate: selected model is unavailable.");
   const levels = getSupportedThinkingLevels(model);
   const savedLevel = previous?.model === slug ? previous.reasoningLevel : undefined;
-  const initial = savedLevel && levels.includes(savedLevel) ? savedLevel :
+  const activeLevel = effective?.model === slug ? effective.reasoningLevel : undefined;
+  const initial = activeLevel && levels.includes(activeLevel) ? activeLevel :
     levels.includes("high") ? "high" : levels[0];
-  const level = await pick(ctx, `Escalate settings · 2/2 · ${slug}`, levels.map((value) => ({
-    value, label: value, description: value === savedLevel ? "saved" : undefined,
-  })), initial, true);
-  if (level === undefined) return;
+  const thinking = await pick(ctx, `Escalate settings · 2/2 · ${slug}`, levels.map((value) => ({
+    value, label: value, description: [value === activeLevel ? "current" : "", value === savedLevel ? "saved" : ""].filter(Boolean).join(" · "),
+  })), initial, true, target.save);
+  if (thinking === undefined) return;
+  const level = thinking.value;
   if (!levels.some((item) => item === level)) throw new Error("pi-escalate: selected thinking level is unsupported.");
-  if (ctx.sessionManager.getSessionId() !== session || !ctx.isIdle() || ctx.hasPendingMessages()) {
-    ctx.ui.notify("pi-escalate: session changed or work started; settings were not saved.", "warning");
+  if (!isCurrent() || ctx.sessionManager.getSessionId() !== session || !ctx.isIdle() || ctx.hasPendingMessages()) {
+    ctx.ui.notify("pi-escalate: session changed or work started; settings were not applied or saved.", "warning");
     return;
   }
-  // Revalidate the chosen model immediately before writing, without making a model request.
+  // Revalidate before applying or writing, without making a model request.
   const current = availableTargets(ctx).find((item) => `${item.provider}/${item.id}` === slug);
   if (!current || !getSupportedThinkingLevels(current).some((item) => item === level)) {
-    ctx.ui.notify("pi-escalate: model availability changed; settings were not saved.", "warning");
+    ctx.ui.notify("pi-escalate: model availability changed; settings were not applied or saved.", "warning");
     return;
   }
-  await writeConfig(path, { model: slug, reasoningLevel: level as EscalateConfig["reasoningLevel"] });
-  ctx.ui.notify(`pi-escalate: saved ${slug} · thinking ${level}`, "info");
+  const config = { model: slug, reasoningLevel: level as EscalateConfig["reasoningLevel"] };
+  if (target.save || thinking.save) {
+    await writeConfig(path, config);
+    ctx.ui.notify(`pi-escalate: saved ${slug} · thinking ${level} (applied to this session)`, "info");
+  } else {
+    ctx.ui.notify(`pi-escalate: applied ${slug} · thinking ${level} to this session only; config unchanged`, "info");
+  }
+  return config;
 }

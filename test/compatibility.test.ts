@@ -55,7 +55,7 @@ test("public bootstrap rejects missing registration APIs before registering or d
   assert.equal(registrations, 0);
 });
 
-test("public bootstrap registers unchanged commands/tool without making a model call or session record", async () => {
+test("public bootstrap registers only /escalate and its tool without making a model call or session record", async () => {
   const commands: string[] = [];
   const tools: string[] = [];
   await bootstrap({
@@ -64,7 +64,7 @@ test("public bootstrap registers unchanged commands/tool without making a model 
     getActiveTools: () => ["codemode"],
     sendUserMessage: () => { throw new Error("bootstrap must not dispatch"); },
   } as unknown as ExtensionAPI);
-  assert.deepEqual(commands, ["escalate-set", "escalate"]);
+  assert.deepEqual(commands, ["escalate"]);
   assert.deepEqual(tools, ["escalate"]);
 });
 

@@ -1,10 +1,10 @@
 # pi-escalate
 
-Explicit, headless read-only investigation with another model. **Keep your main model unchanged, and add only the final result you need to its context.**
+Explicit, headless read-only investigation with an oracle model. **Keep your main model unchanged, choose rich handoff or minimal injected context, and add only the final result you need back to the main context.**
 
-`@hyein-cbio/pi-escalate` adds **`/escalate-set`** to choose the target and **`/escalate <request>`** to investigate, backed by the codemode tool `tools.escalate({ question, context? })`. Each invocation creates a transient in-memory Pi agent with **`read`, `grep`, `find`, and `ls` only**. It never switches the main model, inherits the main conversation, or persists child transcripts.
+`@hyein-cbio/pi-escalate` provides **`/escalate set`** for settings, **`/escalate <request>`** for rich handoff investigations, and **`/escalate min <request>`** for at most 500 bytes of added context. The codemode tool remains `tools.escalate({ question, context? })`. Each invocation creates a transient in-memory Pi agent with **`read`, `grep`, `find`, and `ls` only**. It never switches the main model, automatically inherits the main conversation, or persists child transcripts.
 
-This is not an automatic model router. **Only `/escalate` grants permission for one investigation.** Autonomous tool calls and natural-language requests alone are rejected by code, not just discouraged in the prompt. There are no complexity classifiers or failure-streak triggers.
+This is not an automatic model router. **Only `/escalate <request>` or `/escalate min <request>` grants permission for one investigation; `/escalate set` never does.** Autonomous tool calls and natural-language requests alone are rejected by code, not just discouraged in the prompt. There are no complexity classifiers or failure-streak triggers.
 
 ## Install
 
@@ -12,15 +12,14 @@ Requires a stable **Pi 0.99.x or 1.x** release (`@earendil-works/pi-coding-agent
 
 Pi [0.99.0](https://github.com/earendil-works/pi/releases/tag/v0.99.0) introduced the required built-in codemode, tool exposure, structured tool results, nested execution, and usage-accounting APIs. Pi [1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0) made codemode leaner; it is not the first version that provides these APIs.
 
-Verified compatibility for pi-escalate 0.1.3:
+Verified compatibility for pi-escalate 0.2.0:
 
 | Pi version | Type check | Tests |
 |---|---|---|
-| 0.99.0 | Passed | 118/118 passed |
-| 1.0.0 | Passed | 118/118 passed |
-| 1.0.3 | Passed | 118/118 passed |
+| 1.0.3 | Passed | 159/159 passed |
+| 0.99.0 / 1.0.0 | Allowed by runtime policy | Not rerun for 0.2.0 |
 
-Checks ran on 2026-10-07 with Node.js 24.19.0 on Linux, in disposable copies with every Pi-family dependency pinned to each tested version, including transitive dependencies. The unmodified v0.1.3 checkout passed 117/117 tests on each host; the table includes the added documentation release-marker regression test. See [validation details](COMPATIBILITY.md#validation) for the source commit and earlier checks. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; they do not require paid model calls. The exact Node.js 22.19 engine floor was not separately rerun. Earlier v0.1.2 validation verified that Pi 0.87.1, which lacks the required codemode/tool APIs, fails clearly before any extension registration or request.
+The 0.2.0 release was checked on 2026-10-14 with Node.js 26.11.1 on macOS using the locally installed Pi 1.0.3 dependency tree. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; no paid model calls are required. Packaging and whitespace checks also passed. This is not a full exact-version compatibility-matrix run, and the Node.js 22.19 engine floor was not separately exercised. See [validation details and historical results](COMPATIBILITY.md#validation).
 
 Install from npm:
 
@@ -30,7 +29,7 @@ pi install npm:@hyein-cbio/pi-escalate
 
 ### Required: enable codemode
 
-**Installing this package alone does not enable `/escalate`.** Pi's built-in `codemode` tool must be active; it is off by default unless another integration enables it. `/escalate-set` can still configure the investigator without codemode, but `/escalate` stops with a warning before dispatching any request when codemode is inactive.
+**Installing this package alone does not enable investigation.** Pi's built-in `codemode` tool must be active; it is off by default unless another integration enables it. `/escalate set` still works without codemode, but both investigation modes stop before dispatch when codemode is inactive.
 
 Add `"+codemode"` to `defaultTools` in `<Pi agent directory>/settings.json` (normally `~/.pi/agent/settings.json`, or the directory selected by `PI_CODING_AGENT_DIR`). For project-only activation, use the trusted project's `.pi/settings.json` instead. Preserve all existing settings and `defaultTools` entries:
 
@@ -48,26 +47,36 @@ If the inactive-codemode warning persists:
 - `--tools` replaces the selection even on reload. Include `codemode` alongside every other desired tool, for example `pi --tools read,bash,edit,write,codemode`. `--no-tools` and `--no-builtin-tools` also override `defaultTools`; remove those overrides if you want settings to control tool selection.
 - If you explicitly disabled `builtin:codemode`, re-enable that built-in extension too. Tool selection cannot activate an extension that was not loaded.
 
-## Configure: exactly two settings
-
-In Pi's interactive TUI, run:
+## Commands
 
 ```text
-/escalate-set
+/escalate set             # Choose oracle model and thinking level
+/escalate <request>       # Default: rich handoff context
+/escalate min <request>   # Minimal context: at most 500 UTF-8 bytes
 ```
 
-This opens a two-step, searchable settings TUI:
+Only the exact first words `set` and `min` are reserved subcommands. `/escalate set` accepts no extra arguments; investigation commands require a nonempty request. The old `/escalate-set` command is removed, not retained as an alias.
+
+## Configure: session settings and saved defaults
+
+In Pi's interactive TUI, run `/escalate set`. This opens two searchable screens:
 
 1. Choose an authenticated physical chat model from Pi's available-model registry. Virtual routers and models without configured authentication are excluded.
-2. Choose one of that model's supported thinking levels. Non-reasoning models offer only `off`.
+2. Choose a supported thinking level. Non-reasoning models offer only `off`.
 
-Type to filter by slug/name, use the selection keys (normally ↑/↓), and press Enter to choose. Existing saved choices are highlighted. Enter on the second screen saves both values; Escape at either screen cancels without changing the file. The UI honors Pi's selection keybindings and uses its active theme.
+Type to filter, use the selection keys (normally ↑/↓), then:
 
-The command makes no LLM requests, adds no conversation context, does not change the main model/effort or tool selection, and **never grants escalation permission**. It requires TUI mode and an idle session with no queued work; custom terminal UI is not available in RPC/print/JSON modes. Settings UI code loads only when this command is invoked.
+- **Enter**: advance from the model screen; on the thinking screen, apply both choices to this session only. The config file remains byte-for-byte unchanged and is not created during first-time setup.
+- **Ctrl+S**: on the thinking screen, apply both choices and save them as defaults in `pi-escalate.json`. On the model screen, advance and request saving after the thinking selection; Enter on the second screen then completes that save.
+- **Escape** at either screen: cancel without changing session settings or config, even if Ctrl+S was pressed on the first screen.
 
-Selections are revalidated before saving. Both fields are written together by same-directory atomic rename, with a private file mode, and temporary staging files are cleaned up. Changes are effective on the next investigation without reloading.
+The picker highlights the **current** values separately from **saved** defaults. Selection/navigation/cancel honor Pi's selection keybindings; Ctrl+S is the explicit save key. Both values are revalidated before applying. A failed save leaves the previous session settings active.
 
-Alternatively, edit `<Pi agent directory>/pi-escalate.json` manually (normally `~/.pi/agent/pi-escalate.json`):
+The command makes no LLM requests, adds no conversation context, does not change the main model/effort or tool selection, and **never grants escalation permission**. It requires TUI mode and an idle session with no queued work. Custom terminal UI is unavailable in RPC/print/JSON modes. Settings UI code loads only on this path; codemode need not be active to configure settings.
+
+Investigations use the **current session override first**, otherwise read the saved config on every call. Overrides survive ordinary agent runs and tree navigation within the session, but are held only in memory: new/resumed sessions, session shutdown, extension reload, and process restart discard them. They are not written into session transcripts. A different session ID cannot use another session's override. External config edits affect the next investigation only when no session override is active.
+
+Saved defaults live at `<Pi agent directory>/pi-escalate.json` (normally `~/.pi/agent/pi-escalate.json`):
 
 ```json
 {
@@ -76,26 +85,46 @@ Alternatively, edit `<Pi agent directory>/pi-escalate.json` manually (normally `
 }
 ```
 
+There are exactly two persistent settings:
+
 - **`model`**: required, exact `provider/model-id` from Pi's chat model registry. The first slash separates the provider; model IDs may contain further slashes. No fuzzy aliases, main-model fallback, or virtual routers.
-- **`reasoningLevel`**: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Defaults to `high` when omitted. The level must be supported by the target model according to Pi's catalog; unsupported levels fail instead of silently downgrading. Use `off` for a non-reasoning model.
+- **`reasoningLevel`**: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Defaults to `high` when omitted. The level must be supported; unsupported levels fail instead of silently downgrading. Use `off` for a non-reasoning model.
 
-Authentication and endpoints come from Pi's existing provider configuration (`/login`, environment credentials, or `models.json`), not this file. `PI_CODING_AGENT_DIR` is respected through Pi's `getAgentDir()` API. The extension reads the file on every call, so editing these two values does not require reloading.
+Authentication/endpoints come from Pi's existing provider configuration, not this file. `PI_CODING_AGENT_DIR` is respected through `getAgentDir()`. Ctrl+S writes both fields together by same-directory atomic rename with a private file mode and cleans temporary staging files.
 
-Unknown keys, malformed JSON, missing models, and missing authentication fail concisely. `/escalate-set` can replace invalid settings after both selections, but cancellation leaves them untouched. Investigation writes no child transcripts or reports; setup writes only the explicit configuration. There are no project overrides, per-call model/effort overrides, output-size settings, or hidden routing defaults.
+Unknown keys, malformed JSON, missing models, and missing authentication fail concisely when used. `/escalate set` can apply a valid session override without altering an invalid saved config; only Ctrl+S replaces it. There are no project overrides, per-tool-call model/effort overrides, output-size settings, or hidden routing defaults. Context mode is chosen by the command, not saved in config.
 
-## Use: `/escalate`
+## Investigate: handoff or min
+
+### Default: rich handoff
 
 ```text
 /escalate Inspect src/foo.ts for errors the main model may have missed. Give evidence and a reproduction case.
 ```
 
-The command asks your **existing main model** to identify relevant files, prepare a self-contained question and minimal context, and call the investigator once through codemode. The target can read and search independently in the parent's working directory, inspect tool results, and continue its investigation over multiple model turns. Only its final report is returned to the main model. Name files or provide a clear reference; if the request is ambiguous, the main model is instructed to ask rather than guess.
+Your **existing main model** prepares a self-contained question and a rich, relevant structured handoff in `context`: goals, user requirements/constraints, relevant files/functions, verified facts with evidence, attempted approaches and outcomes, its current assessment, and unresolved questions. Facts and hypotheses must be clearly separated. Irrelevant history and secrets are omitted; the raw conversation is never automatically copied.
 
-The target cannot run shell commands, tests, edits, or writes. It may propose a reproduction procedure or fix, but must not claim it executed them. This command requests investigation, not implementation. One `/escalate` means **one isolated execution**, not one provider request.
+### Minimal context
 
-The command refuses empty requests, a busy session, queued messages, or inactive codemode. It does not silently queue, enable tools, or change models. A short dispatch message containing your request and preparation instructions enters the normal parent conversation.
+```text
+/escalate min Check whether the suspected race in src/foo.ts is real.
+```
 
-Permission is in-memory, bound to the session and current agent run signal, and consumed before asynchronous work begins. A second call—even in the same script—is denied. A failed attempt consumes permission too; use `/escalate` again to retry. Unused permission is revoked when the run ends, input changes, or the session starts, navigates its tree, or shuts down. Reloading the extension creates a fresh permission state. Old slash commands in history do not reauthorize calls.
+The main model respects its current assessment and supplies only indispensable additional context, optionally including a short assessment, constraints, or file paths. **The executor enforces at most 500 UTF-8 bytes on the entire `context` string**, including whitespace/headings; this is not a character count. Missing or empty context is valid. Oversized context fails before any oracle request/start notification and consumes permission; it is not silently truncated.
+
+The oracle's question is pinned to the original user request after `min`, not the model-prepared question. This prevents hiding extra context in `question` to bypass the bound. The user's request itself is not counted against the added-context limit. Neither the fixed system prompt/tool schemas nor evidence the oracle reads itself is part of that 500-byte injection budget.
+
+### Shared execution behavior
+
+Both modes start a fresh oracle Agent with no automatic conversation/instruction inheritance. The oracle reads/searches independently in the parent's working directory, checks handoff claims where evidence permits, and may investigate over multiple model turns. The caller's assessment is a starting point, not an authoritative conclusion. Only the final report returns to the main model; intermediate text/thinking/tool results stay private.
+
+When its first model request starts, interactive and RPC clients receive one informational notification showing the effective `provider/model-id` and thinking level, for example `pi-escalate: investigating with your-provider/your-model-id · thinking high`. This includes session-only choices. It is not repeated for later turns or included in either conversation or the returned report. Rejected/pre-cancelled requests produce no start notification; print/JSON modes emit no notification or extra stdout.
+
+The oracle cannot run shell commands, tests, edits, or writes. It may propose a reproduction procedure or fix, but cannot claim execution. Investigation does not implement fixes. One command authorizes **one isolated execution**, not one provider request.
+
+Investigation refuses empty requests, a busy session, queued messages, an open settings dialog, or inactive codemode. It does not silently queue, activate tools, or switch the main model. A dispatch message with your request and the selected preparation instructions enters the parent conversation. If required context is unclear, the main model is instructed to ask rather than guess.
+
+Permission and context mode are held in memory, bound to the session/current agent run signal, and consumed before asynchronous work. A second call—even in the same script—is denied. Failed attempts consume permission too; use a new command to retry. Unused permission is revoked on run completion, changed input, session start/tree navigation/shutdown, or extension reload. Old commands in history do not reauthorize calls. Tool arguments cannot change the authorized context mode.
 
 ### Internal codemode call
 
@@ -104,7 +133,7 @@ During the authorized `/escalate` run, the main model uses this shape:
 ```js
 const result = await tools.escalate({
   question: "Which invariant does this implementation violate, if any?",
-  context: "Only the relevant implementation and its intended contract.",
+  context: "Goal: ...\nRequirements: ...\nVerified facts/evidence: ...\nAssessment/hypotheses: ...\nAttempts: ...\nOpen questions: ...",
 });
 text(result.answer);
 ```
@@ -119,7 +148,7 @@ The script receives:
 
 ### Keep large inputs out of the main model's context
 
-Usually, give the investigator file paths and a focused question; it can gather evidence itself:
+Prefer file paths and evidence pointers over raw dumps in the handoff; the investigator can gather evidence itself. In min mode, keep any supplied context within the enforced 500-byte limit, and the original user request remains the oracle's question:
 
 ```js
 const result = await tools.escalate({
@@ -141,7 +170,7 @@ text(result.answer);
 if (result.truncated) text("Investigation or answer reached a fixed limit.");
 ```
 
-Supplied reference data and the target's own tool results remain inside the script/child pipeline rather than becoming standalone parent tool results. The target receives the supplied question/context, a small private system prompt, and its fixed read-only tools—not automatically inherited main conversation, project instructions, skills, extensions, or MCP servers. The main model chooses the supplied input and is instructed not to forward conversation history. Each new `/escalate` investigation starts independently.
+Supplied reference data and the target's own tool results remain inside the script/child pipeline rather than becoming standalone parent tool results. The target receives the authorized question/context, a small private system prompt, and fixed read-only tools—not automatically inherited main conversation, project instructions, skills, extensions, or MCP servers. The main model summarizes relevant history as a handoff by default, or minimizes added context in min mode; it must not forward raw conversation history. Each new investigation starts independently.
 
 Do not put huge inputs literally into the codemode source: the source itself is part of the parent conversation. Do not `text(context)`, `console.log(context)`, or `store()` reference material you want to keep out of the parent context/storage. `store()` persists values in Pi's session. Tools used to gather inputs must themselves be active or callable.
 
@@ -171,7 +200,7 @@ This is an application-level boundary, **not an OS sandbox**. Concurrent path re
 
 ## What is—and is not—recorded
 
-**Investigation writes no execution logs, artifacts, or child session transcripts.** The extension's only persistent data is `pi-escalate.json`, saved explicitly through `/escalate-set` (or edited by you). It does not create a `SessionManager`, append custom entries, or persist permission state. `/escalate` uses `sendUserMessage` to dispatch the request to the unchanged main model; that short request is stored by the parent session as normal input.
+**Investigation writes no execution logs, artifacts, or child session transcripts.** The extension's only persistent data is `pi-escalate.json`, saved explicitly with Ctrl+S through `/escalate set` (or edited by you). It does not create a `SessionManager`, append custom entries, or persist permission state. `/escalate` uses `sendUserMessage` to dispatch the request to the unchanged main model; that short request is stored by the parent session as normal input.
 
 That is not a claim that the entire Pi/provider stack is record-free:
 
@@ -181,7 +210,7 @@ That is not a claim that the entire Pi/provider stack is record-free:
 - Oversized codemode output may be written to a temp file by codemode. One bounded answer normally stays below its default output budget; printing many answers or lowering that budget can still trigger a spill.
 - The provider/proxy may retain requests. `cacheRetention: "none"` is a cache preference, not a deletion guarantee.
 
-The primary contract is **minimal additional model context and no extension-owned child execution records**, not secrecy from the host or provider.
+The primary contract is **controlled context injection, only the final report added back to the main model, and no extension-owned child execution records**, not secrecy from the host or provider.
 
 ## Development
 
@@ -194,7 +223,7 @@ npm pack --dry-run
 
 No compilation step is needed for Pi: it loads the TypeScript entry point. Host packages are peer dependencies; development copies are not bundled in the published package.
 
-Tests include a real Pi SDK + slash commands + codemode + local OpenAI-compatible HTTP fixture, with no external API credentials or paid model calls. They exercise multi-turn investigation with all four native tools and verify that only the final report reaches the parent, intermediate text/thinking/tool results stay private, model/effort remain unchanged, usage is aggregated, and no child files are created. Tests also cover forbidden and mixed tool batches, request/tool budgets, the tool-free final-report phase, failed reads, output clipping, missing search binaries, independent executions, and sanitized later-turn failures. The real extension loader also exercises the lazy settings UI with simulated keyboard input and verifies it makes no model calls, appends no context, and grants no permission. Native TUI component tests cover searching, selection defaults, remapped keys, focus, Unicode/narrow rendering, cancellation, supported model/effort lists, and atomic saves. Other unit tests cover permission lifetime/session/signal boundaries, configuration, cancellation/deadlines, result limits, and tool registration.
+Tests include a real Pi SDK + slash commands + codemode + local OpenAI-compatible HTTP fixture, with no external API credentials or paid model calls. They exercise multi-turn investigation with all four native tools and verify that only the final report reaches the parent, intermediate text/thinking/tool results stay private, model/effort remain unchanged, usage is aggregated, and no child files are created. Tests also cover forbidden and mixed tool batches, request/tool budgets, the tool-free final-report phase, failed reads, output clipping, missing search binaries, independent executions, and sanitized later-turn failures. The real extension loader also exercises the lazy settings UI with simulated keyboard input and verifies it makes no model calls, appends no context, and grants no permission. Tests cover handoff/min dispatch, UTF-8 limits and question-bypass prevention, Enter/Ctrl+S, cancellation/save failures, temporary-setting precedence and lifecycle isolation, and once-only start notifications. Native TUI component tests cover searching, selection defaults, remapped keys, focus, Unicode/narrow rendering, cancellation, supported model/effort lists, and atomic saves. Other unit tests cover permission lifetime/session/signal boundaries, configuration, cancellation/deadlines, result limits, and tool registration.
 
 ## Name
 

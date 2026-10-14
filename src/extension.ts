@@ -1,53 +1,53 @@
 import { join } from "node:path";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { readConfig } from "./config.ts";
+import { readConfig, type EscalateConfig } from "./config.ts";
 import { escalate, EscalateError, MAX_ANSWER_CHARS } from "./escalate.ts";
 import { EscalatePermission } from "./permission.ts";
 import { assertCommandContext, assertRegistry } from "./compatibility.ts";
+import { dispatchPrompt, investigationInput, parseCommand } from "./request.ts";
 
 export default function piEscalate(pi: ExtensionAPI) {
   const permission = new EscalatePermission();
   let settingUp = false;
-
-  pi.registerCommand("escalate-set", {
-    description: "Choose the escalation model and thinking level in a local settings TUI.",
-    handler: async (args, ctx) => {
-      assertCommandContext(ctx);
-      const fail = (message: string) => {
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else throw new Error(message);
-      };
-      if (ctx.mode !== "tui" || !ctx.hasUI) return fail("pi-escalate: /escalate-set requires Pi TUI mode.");
-      if (args.trim()) return fail("Usage: /escalate-set");
-      if (settingUp || !ctx.isIdle() || ctx.hasPendingMessages()) {
-        return fail("pi-escalate: finish current work or the open settings dialog first.");
-      }
-      settingUp = true;
-      try {
-        // Keep UI dependencies off the ordinary headless execution path.
-        const { configureEscalation } = await import("./setup.ts");
-        await configureEscalation(ctx, join(getAgentDir(), "pi-escalate.json"));
-      } catch (error) {
-        return fail(error instanceof Error && error.message.startsWith("pi-escalate:") ? error.message :
-          "pi-escalate: settings could not be saved. Check configuration directory permissions.");
-      } finally {
-        settingUp = false;
-      }
-    },
-  });
+  let sessionConfig: { session: string; config: EscalateConfig } | undefined;
+  let sessionGeneration = 0;
 
   pi.registerCommand("escalate", {
-    description: "Run one read-only investigation with the configured model, without switching the main model.",
+    description: "Investigate with a rich handoff; use min for ≤500-byte context, or set to choose model/thinking.",
     handler: async (args, ctx) => {
       assertCommandContext(ctx);
       const fail = (message: string) => {
         if (ctx.hasUI) ctx.ui.notify(message, "warning");
         else throw new Error(message);
       };
-      if (!args.trim()) return fail("Usage: /escalate <question or bounded task>");
+      let command;
+      try { command = parseCommand(args); }
+      catch (error) { return fail((error as Error).message); }
       if (settingUp || !ctx.isIdle() || ctx.hasPendingMessages()) {
-        return fail("pi-escalate: wait for the current work and queued messages to finish, then use /escalate.");
+        return fail("pi-escalate: finish current work, queued messages, or the open settings dialog first.");
+      }
+      if (command.kind === "set") {
+        if (ctx.mode !== "tui" || !ctx.hasUI) return fail("pi-escalate: /escalate set requires Pi TUI mode.");
+        settingUp = true;
+        const session = ctx.sessionManager.getSessionId();
+        const generation = sessionGeneration;
+        try {
+          // Keep UI dependencies off the ordinary headless execution path.
+          const { configureEscalation } = await import("./setup.ts");
+          const current = sessionConfig?.session === session ? sessionConfig.config : undefined;
+          const config = await configureEscalation(ctx, join(getAgentDir(), "pi-escalate.json"), current,
+            () => sessionGeneration === generation);
+          if (config && sessionGeneration === generation && ctx.sessionManager.getSessionId() === session) {
+            sessionConfig = { session, config };
+          }
+        } catch (error) {
+          return fail(error instanceof Error && error.message.startsWith("pi-escalate:") ? error.message :
+            "pi-escalate: settings could not be applied or saved. Check configuration directory permissions.");
+        } finally {
+          settingUp = false;
+        }
+        return;
       }
       if (!pi.getActiveTools().includes("codemode")) {
         return fail(
@@ -56,15 +56,8 @@ export default function piEscalate(pi: ExtensionAPI) {
           "If you start Pi with --tools, include codemode in that list.",
         );
       }
-      const prompt = [
-        `Escalate once: ${args.trim()}`,
-        "Use codemode to identify relevant files and prepare minimal context; call tools.escalate exactly once.",
-        "The investigator can use read, grep, find, and ls in this working directory. Do not prefetch whole files unnecessarily.",
-        "Make its question self-contained; do not forward the conversation or print reference data.",
-        "Print result.answer and note result.truncated if true. Summarize briefly without duplicating long output; do not implement fixes.",
-        "If required context is unclear, ask the user instead of guessing or making an unrelated call.",
-      ].join("\n");
-      permission.prepare(ctx.sessionManager.getSessionId(), prompt);
+      const prompt = dispatchPrompt(command);
+      permission.prepare(ctx.sessionManager.getSessionId(), prompt, command);
       try {
         pi.sendUserMessage(prompt, { expandPromptTemplates: false });
       } catch (error) {
@@ -81,18 +74,24 @@ export default function piEscalate(pi: ExtensionAPI) {
     permission.beforeStart(event.prompt, ctx.sessionManager.getSessionId());
   });
   pi.on("agent_start", (_event, ctx) => { permission.start(ctx); });
-  // Revoke even an unused grant on completion, cancellation, or a failed run.
+  // Revoke even an unused grant; temporary settings survive ordinary runs/tree navigation.
   pi.on("agent_end", () => { permission.clear(); });
-  pi.on("session_start", () => { permission.clear(); });
   pi.on("session_tree", () => { permission.clear(); });
-  pi.on("session_shutdown", () => { permission.clear(); });
+  const resetSession = () => {
+    permission.clear();
+    sessionConfig = undefined;
+    sessionGeneration++;
+  };
+  pi.on("session_start", resetSession);
+  pi.on("session_shutdown", resetSession);
 
   pi.registerTool(defineTool({
     name: "escalate",
     label: "Escalate",
     description:
-      "Only after /escalate: run one read-only investigation of its requested question. " +
-      "The target has read, grep, find, ls; no history or extensions are inherited. Send minimal context. " +
+      "Only after /escalate or /escalate min: run one read-only investigation of its requested question. " +
+      "The target has read, grep, find, ls; no history or extensions are inherited. " +
+      "Follow the authorized mode: rich structured handoff by default; min context ≤500 UTF-8 bytes. " +
       "Returns { answer, truncated }. Print only what you need from codemode.",
     exposure: "codemode",
     annotations: {
@@ -102,21 +101,27 @@ export default function piEscalate(pi: ExtensionAPI) {
       openWorldHint: true,
     },
     parameters: Type.Object({
-      question: Type.String({ minLength: 1, description: "One self-contained question." }),
-      context: Type.Optional(Type.String({ description: "Only the reference material needed to answer." })),
+      question: Type.String({ minLength: 1, description: "One self-contained question; in min mode the executor uses the original user request." }),
+      context: Type.Optional(Type.String({ description: "Relevant structured handoff, or at most 500 UTF-8 bytes in min mode." })),
     }, { additionalProperties: false }),
     outputSchema: Type.Object({
       answer: Type.String({ maxLength: MAX_ANSWER_CHARS }),
       truncated: Type.Boolean(),
     }, { additionalProperties: false }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      permission.consume(ctx);
+      const authorized = permission.consume(ctx);
+      const input = investigationInput(params, authorized);
       assertRegistry(ctx.modelRegistry);
-      const config = await readConfig(join(getAgentDir(), "pi-escalate.json"));
+      const current = sessionConfig?.session === ctx.sessionManager.getSessionId() ? sessionConfig.config : undefined;
+      const config = current ?? await readConfig(join(getAgentDir(), "pi-escalate.json"));
       try {
         const signals = [signal, ctx.signal].filter((item): item is AbortSignal => item !== undefined);
-        const result = await escalate(params, config, ctx.modelRegistry,
-          signals.length ? AbortSignal.any(signals) : undefined, ctx.cwd);
+        const result = await escalate(input, config, ctx.modelRegistry,
+          signals.length ? AbortSignal.any(signals) : undefined, ctx.cwd, () => {
+            if (ctx.hasUI) {
+              ctx.ui.notify(`pi-escalate: investigating with ${config.model} · thinking ${config.reasoningLevel}`, "info");
+            }
+          });
         return {
           content: [{ type: "text", text: result.output.answer }],
           structuredContent: { ...result.output },

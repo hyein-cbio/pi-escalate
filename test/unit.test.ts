@@ -98,7 +98,13 @@ test("one isolated investigation, fixed read-only tools, concise answer and usag
   const f = fixture(response({
     content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: " Answer. " }],
   }));
-  const result = await escalate({ question: "Question?", context: "reference" }, config, f.registry);
+  let starts = 0;
+  const result = await escalate({ question: "Question?", context: "reference" }, config, f.registry,
+    undefined, process.cwd(), () => {
+      starts++;
+      assert.equal(f.calls.length, 0);
+    });
+  assert.equal(starts, 1);
   assert.deepEqual(result.output, { answer: "Answer.", truncated: false });
   assert.equal(result.usage.totalTokens, 30);
   assert.equal(f.calls.length, 1);
@@ -134,27 +140,38 @@ test("generation budget respects a smaller target model limit", async () => {
 
 test("blank question fails before calling a model", async () => {
   const f = fixture();
-  await assert.rejects(escalate({ question: " \n " }, config, f.registry), /blank/);
+  let starts = 0;
+  await assert.rejects(escalate({ question: " \n " }, config, f.registry,
+    undefined, process.cwd(), () => { starts++; }), /blank/);
+  assert.equal(starts, 0);
   assert.equal(f.calls.length, 0);
 });
 
 test("missing target or authentication never falls back to the main model", async () => {
   const f = fixture();
   f.raw.hasConfiguredAuth = () => false;
-  await assert.rejects(escalate({ question: "Q" }, config, f.registry), /authentication/);
+  let starts = 0;
+  const onStart = () => { starts++; };
+  await assert.rejects(escalate({ question: "Q" }, config, f.registry,
+    undefined, process.cwd(), onStart), /authentication/);
   const missing = { ...f.raw, find: () => undefined } as unknown as ExtensionContext["modelRegistry"];
-  await assert.rejects(escalate({ question: "Q" }, config, missing), /registry/);
+  await assert.rejects(escalate({ question: "Q" }, config, missing,
+    undefined, process.cwd(), onStart), /registry/);
+  assert.equal(starts, 0);
   assert.equal(f.calls.length, 0);
 });
 
 test("virtual routers and unsupported reasoning fail before execution", async () => {
   const f = fixture();
+  let starts = 0;
+  const onStart = () => { starts++; };
   const virtual = { ...f.raw, find: () => ({ ...model, api: "pi-virtual" }) };
   await assert.rejects(escalate({ question: "Q" }, config,
-    virtual as unknown as ExtensionContext["modelRegistry"]), /physical/);
+    virtual as unknown as ExtensionContext["modelRegistry"], undefined, process.cwd(), onStart), /physical/);
   const simple = { ...f.raw, find: () => ({ ...model, reasoning: false }) };
   await assert.rejects(escalate({ question: "Q" }, config,
-    simple as unknown as ExtensionContext["modelRegistry"]), /not supported/);
+    simple as unknown as ExtensionContext["modelRegistry"], undefined, process.cwd(), onStart), /not supported/);
+  assert.equal(starts, 0);
   assert.equal(f.calls.length, 0);
 });
 
@@ -203,7 +220,10 @@ test("unexpected provider exception is sanitized", async () => {
 
 test("already cancelled calls never reach the provider", async () => {
   const f = fixture();
-  await assert.rejects(escalate({ question: "Q" }, config, f.registry, AbortSignal.abort()), /cancelled/);
+  let starts = 0;
+  await assert.rejects(escalate({ question: "Q" }, config, f.registry, AbortSignal.abort(),
+    process.cwd(), () => { starts++; }), /cancelled/);
+  assert.equal(starts, 0);
   assert.equal(f.calls.length, 0);
 });
 

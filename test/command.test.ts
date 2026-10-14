@@ -58,12 +58,40 @@ const toolCall = (h: ReturnType<typeof harness>) => h.tools[0].execute("call", {
 
 test("/escalate dispatches the bounded request without expanding slash commands or adding settings", async () => {
   const h = harness();
-  assert.deepEqual([...h.commands.keys()], ["escalate-set", "escalate"]);
+  assert.deepEqual([...h.commands.keys()], ["escalate"]);
   await h.invoke("  Inspect src/foo.ts for missed errors.  ");
   assert.equal(h.sent.length, 1);
   assert.match(h.sent[0].content, /^Escalate once: Inspect src\/foo.ts for missed errors\./);
   assert.match(h.sent[0].content, /tools\.escalate exactly once/);
+  assert.match(h.sent[0].content, /Mode: handoff \(default\)/);
+  assert.match(h.sent[0].content, /confirmed facts with evidence/);
   assert.deepEqual(h.sent[0].options, { expandPromptTemplates: false });
+  assert.equal(h.notices.length, 0);
+});
+
+test("/escalate min dispatches minimal preparation and binds the original request to permission", async () => {
+  const h = harness();
+  await h.invoke("min Inspect foo.ts");
+  assert.match(h.sent[0].content, /^Escalate once: Inspect foo.ts/);
+  assert.match(h.sent[0].content, /Mode: min/);
+  assert.match(h.sent[0].content, /500 UTF-8 bytes/);
+});
+
+test("bare min or malformed set never dispatches or grants permission", async () => {
+  const h = harness();
+  for (const args of ["min", "set extra"]) await h.invoke(args);
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.notices.length, 2);
+  await assert.rejects(toolCall(h), /use \/escalate/);
+});
+
+test("authorized min rejects oversized context before config lookup and consumes permission", async () => {
+  const h = harness();
+  await h.invoke("min Q");
+  start(h);
+  await assert.rejects(h.tools[0].execute("call", { question: "Q", context: "가".repeat(167) },
+    h.ctx.signal, undefined, h.ctx as unknown as Parameters<ToolDefinition["execute"]>[4]), /500 UTF-8 bytes/);
+  await assert.rejects(toolCall(h), /use \/escalate/);
   assert.equal(h.notices.length, 0);
 });
 
@@ -194,6 +222,17 @@ test("aborted or missing signals cannot authorize execution", () => {
   grant(permission, ctx);
   controller.abort();
   assert.throws(() => permission.consume(ctx), /use \/escalate/);
+});
+
+test("permission retains command mode and original request, not mutable caller data", () => {
+  const permission = new EscalatePermission();
+  const ctx = context("a", new AbortController().signal);
+  const input = { mode: "min" as const, request: "Original Q" };
+  permission.prepare("a", "dispatch", input);
+  input.request = "Mutated Q";
+  permission.beforeStart("dispatch", "a");
+  permission.start(ctx);
+  assert.deepEqual(permission.consume(ctx), { mode: "min", request: "Original Q" });
 });
 
 test("a fresh command replaces stale pending permission and grants one new call", () => {
