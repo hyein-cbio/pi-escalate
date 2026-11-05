@@ -81,6 +81,11 @@ export default function piEscalate(pi: ExtensionAPI) {
     permission.observeInput(event.text, ctx.sessionManager.getSessionId());
   });
   pi.on("before_agent_start", (event, ctx) => {
+    // Newer Pi also emits custom-message starts; only a user prompt can match the dispatch.
+    if (!("prompt" in event) || typeof event.prompt !== "string") {
+      permission.clear();
+      return;
+    }
     permission.beforeStart(event.prompt, ctx.sessionManager.getSessionId());
   });
   pi.on("agent_start", (_event, ctx) => { permission.start(ctx); });

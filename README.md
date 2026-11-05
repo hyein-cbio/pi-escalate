@@ -232,6 +232,28 @@ npm pack --dry-run
 
 No compilation step is needed for Pi: it loads the TypeScript entry point. Host packages are peer dependencies; development copies are not bundled in the published package.
 
+### Compatibility CI
+
+The [Compatibility workflow](.github/workflows/compatibility.yml) runs on pushes to `main`, same-repository pull requests, a monthly schedule (the 1st at 05:00 UTC), and manual dispatch. GitHub Actions only installs the Python Modal SDK and dispatches work: **all Node/npm work runs on Modal**, including latest-Pi lookup, dependency installation, type checks, the full functional/regression suite, and package dry-run.
+
+Each workflow invokes `modal run` once, creating **one ephemeral App, `pi-escalate-ci`**, with two parallel inputs: the committed dependency tree and the latest npm Pi release. The shared function scales to at most two containers, with one input executing per container (no input-concurrency decorator). Each input uses a fresh temporary checkout, even if a warm container is reused. Both results are collected before any test failure fails the aggregate GitHub check. The App stops after the run; there are no per-cell Apps or persistent deployment.
+
+The image is `node:22-trixie-slim` with Python 3.11, `ripgrep`, and `fd-find`. Trixie supplies a newer fd with the required `--no-require-git` option; Bookworm’s fd 8.6 is too old. Each test container has 1 CPU, 2 GiB memory, a 15-minute timeout, and no automatic retries. Only explicit package/source/test/CI inputs are uploaded, not `.env`, `.git`, `.pi`, or local `node_modules`. The latest input pins and verifies one exact Pi-family version in its disposable copy; it does not update the repository lockfile or automatically broaden the supported host range. Modal compute may incur costs.
+
+Add `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as repository or organization Actions secrets (with access granted to this repository). Missing credentials fail explicitly. Fork PRs are skipped because they cannot access these secrets; `pull_request_target` is not used. Do not manually dispatch untrusted code with Modal credentials. If configuring branch protection, require **Pi compatibility on Modal**.
+
+To reproduce with Python 3.11 and a configured Modal profile or token environment variables:
+
+```sh
+python -m pip install -r ci/requirements.txt
+python -m unittest discover -s ci -p 'test_*.py' # Offline dispatcher regression tests
+modal run ci/modal_ci.py::matrix
+```
+
+The Python regression tests also run inside each Modal test input. They cover dispatch aggregation, failure propagation, exact-version preparation, upload allowlisting, and clean-copy isolation.
+
+These tests use local provider fixtures: they verify the extension and Pi/codemode contract, **not a live Astra release**. When manually changing the default oracle model to Astra x.x, run the workflow and separately perform a live smoke check with your configured provider: run `/escalate` and `/escalate min` on a harmless workspace question requiring a file read, confirm the new model is selected, the investigation finishes, and the main model/thinking remain unchanged. Live checks use your provider credentials and may incur charges; CI requires neither credentials nor paid requests.
+
 Tests include a real Pi SDK + slash commands + codemode + local OpenAI-compatible HTTP fixture, with no external API credentials or paid model calls. They exercise multi-turn investigation with all four native tools and verify that only the final report reaches the parent, intermediate text/thinking/tool results stay private, model/effort remain unchanged, usage is aggregated, and no child files are created. Tests also cover forbidden and mixed tool batches, request/tool budgets, the tool-free final-report phase, failed reads, output clipping, missing search binaries, independent executions, and sanitized later-turn failures. The real extension loader also exercises the lazy settings UI with simulated keyboard input and verifies it makes no model calls, appends no context, and grants no permission. Tests cover handoff/min dispatch, UTF-8 limits and question-bypass prevention, Enter/Ctrl+S, cancellation/save failures, temporary-setting precedence and lifecycle isolation, and once-only start notifications. Native TUI component tests cover searching, selection defaults, remapped keys, focus, Unicode/narrow rendering, cancellation, supported model/effort lists, and atomic saves. Other unit tests cover permission lifetime/session/signal boundaries, configuration, cancellation/deadlines, result limits, and tool registration.
 
 ## Name

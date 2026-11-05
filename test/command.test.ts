@@ -7,7 +7,8 @@ import extension from "../src/extension.ts";
 import { EscalatePermission } from "../src/permission.ts";
 
 type Command = Parameters<ExtensionAPI["registerCommand"]>[1];
-type Handler = (event: { text?: string; prompt?: string }, ctx: ExtensionContext) => void;
+type Handler = (event: { text?: string; prompt?: string; messageType?: "user" | "custom";
+  message?: { content: string } }, ctx: ExtensionContext) => void;
 
 function harness() {
   const commands = new Map<string, Command>();
@@ -247,6 +248,33 @@ test("a transformed or unrelated dispatch fails closed", async () => {
   h.emit("agent_start");
   await assert.rejects(toolCall(h), /use \/escalate/);
 });
+
+test("newer Pi user-message starts preserve explicit min authorization", async () => {
+  const h = harness();
+  await h.invoke("min Q");
+  h.emit("before_agent_start", { messageType: "user", prompt: h.sent[0].content });
+  h.emit("agent_start");
+  await assert.rejects(h.tools[0].execute("call", { question: "Q", context: "x".repeat(501) },
+    h.ctx.signal, undefined, h.ctx as unknown as Parameters<ToolDefinition["execute"]>[4]), /500 UTF-8 bytes/);
+  await assert.rejects(toolCall(h), /use \/escalate/);
+});
+
+for (const state of ["idle", "pending", "granted"] as const) {
+  test(`custom-message starts cannot authorize escalation and revoke ${state} permission`, async () => {
+    const h = harness();
+    if (state !== "idle") await h.invoke("Q");
+    if (state === "granted") start(h);
+    const prompt = h.sent[0]?.content ?? "Escalate once: Q";
+    h.emit("before_agent_start", { messageType: "custom", message: { content: prompt } });
+    h.emit("agent_start");
+    await assert.rejects(toolCall(h), /use \/escalate/);
+    // Replaying the original dispatch must not resurrect a pending command either.
+    h.emit("before_agent_start", { prompt });
+    h.emit("agent_start");
+    await assert.rejects(toolCall(h), /use \/escalate/);
+    assert.equal(h.notices.length, 0);
+  });
+}
 
 function context(session: string, signal?: AbortSignal): ExtensionContext {
   return { sessionManager: { getSessionId: () => session }, signal } as unknown as ExtensionContext;

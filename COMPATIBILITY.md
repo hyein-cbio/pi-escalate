@@ -79,6 +79,20 @@ Earlier **v0.1.2** validation used Node.js 22.23.1 on macOS: the type check and 
 
 Tests use the real SDK/extension loader/codemode with local HTTP provider fixtures; no real provider credentials or paid calls are required. Coverage includes permission revocation, unchanged parent model/effort, private child context, native read-only tools, budgets, cancellation, usage, and lazy settings UI. Install `rg` and `fd` (or `fdfind`) before native search tests.
 
+## Continuous functional checks
+
+The [Compatibility workflow](.github/workflows/compatibility.yml) dispatches **one ephemeral Modal App per workflow run**, not one App per matrix cell. Two parallel inputs check the committed lockfile and an exact-version-pinned latest npm Pi family in separate temporary checkouts. The function scales to two containers (one active input per container). All Node/npm work, including the latest-version lookup, functional/regression tests, type check, dependency-tree inspection, and package dry-run, executes on Modal using Node.js 22 / Debian Linux. GitHub only installs the Python dispatcher and invokes Modal once. Each input also runs the offline Python CI regression tests. All cell results are collected; any failure fails the aggregate check.
+
+Checks run on pushes to `main`, same-repository PRs, a monthly schedule (the 1st at 05:00 UTC), and manual dispatch. Fork PRs are skipped because Modal token secrets are unavailable. See [Modal setup and reproduction](README.md#compatibility-ci) for the required secrets, resource limits, and upload policy. The latest input rejects mixed Pi-family versions; lookup/install failures do not fall back to the locked host. A new unsupported major release intentionally fails rather than changing the runtime policy automatically. These automated runs do not replace the dated release-validation records above or claim that the minimum host was rerun.
+
+The HTTP fixtures do not call Astra. A manually selected new Astra default needs a separate live smoke check; see the [development checklist](README.md#compatibility-ci). No oracle model is hard-coded by this extension, and CI does not change users’ saved/session settings.
+
+### Modal migration verification — 2026-11-05
+
+A [manual Modal run](https://modal.com/apps/hyein-sophia-cho/main/ap-F2dGzDDvox9n4e1d2RNiLQ) passed both inputs on Node.js **22.23.4 / Debian Trixie**, using locked Pi **1.0.3** and npm latest Pi **1.5.0**. Each passed the type check, **167/167 functional/regression tests with no skips**, **16 Python CI regression tests**, dependency-tree inspection, and package dry-run. Logs show two distinct Modal task IDs under the same App. The App completed and was confirmed stopped with zero tasks. Trixie provided ripgrep **14.1.1** and fd **10.2.0**; an initial Bookworm run correctly failed because its fd 8.6 lacks the required search flag.
+
+This validates the dispatcher and remote checks, not GitHub Actions secret/branch-protection setup or a live Astra invocation. Workflow YAML, single-dispatch structure, fork gating, shell syntax, and whitespace were also checked locally.
+
 ## Reproduce an exact-version check
 
 Use a disposable **copy** of the checkout, including its source, tests, manifest, README, and this document. Do not replace the real checkout's dependencies or lockfile. Keep `package.json`'s release version unchanged when pinning host dependencies so the documentation regression test checks the same release. In the disposable copy:
