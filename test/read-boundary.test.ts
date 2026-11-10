@@ -140,6 +140,50 @@ test("grep preserves literal/case/context/glob behavior and cannot inherit follo
   }
 });
 
+test("grep roots directory globs and reported paths at the canonical search path", async () => {
+  const w = await workspace();
+  try {
+    const directory = join(w.root, "subrepo", "migrations", "main");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "safe.ts"), SOURCE);
+    await writeFile(join(directory, "skip.txt"), SOURCE);
+    await symlink(join(w.outside, "secret.ts"), join(directory, "escape.ts"), "file");
+    await symlink(w.outside, join(directory, "escape-dir"), "dir");
+    await symlink(join(w.root, "subrepo"), join(w.root, "subrepo-alias"), "dir");
+    // A root-relative validator would mistake the safe result for this external link.
+    await mkdir(join(w.root, "migrations", "main"), { recursive: true });
+    await symlink(join(w.outside, "secret.ts"), join(w.root, "migrations", "main", "safe.ts"), "file");
+    const grep = createInvestigationTools(join(w.base, "alias")).find((item) => item.name === "grep")!;
+    for (const path of ["subrepo", join(w.root, "subrepo"), pathToFileURL(join(w.root, "subrepo")).href, "subrepo-alias"]) {
+      for (const glob of ["migrations/main/*.ts", "./migrations/main/*.ts", "*.ts"]) {
+        const output = await grep.execute("directory-glob", {
+          path, pattern: "safeNeedle|OUTSIDE-SECRET", glob, context: 1,
+        });
+        assert.deepEqual(output.content, [{ type: "text", text:
+          "migrations/main/safe.ts:1: const safeNeedle = true;\nmigrations/main/safe.ts-2: const other = 1;" }]);
+      }
+    }
+    const excluded = await grep.execute("negated-glob", {
+      path: "subrepo", pattern: "safeNeedle", glob: "!./migrations/main/*",
+    });
+    assert.deepEqual(excluded.content, [{ type: "text", text: "No matches found." }]);
+  } finally { await w.dispose(); }
+});
+
+test("grep retains single-file searches with and without globs", async () => {
+  const w = await workspace();
+  try {
+    const grep = createInvestigationTools(w.root).find((item) => item.name === "grep")!;
+    for (const path of ["src/safe.ts", "inside.ts"]) {
+      for (const glob of [undefined, "*.ts"]) {
+        const output = await grep.execute("file-glob", { path, pattern: "safeNeedle", glob, context: 1 });
+        assert.deepEqual(output.content, [{ type: "text", text:
+          "safe.ts:1: const safeNeedle = true;\nsafe.ts-2: const other = 1;" }]);
+      }
+    }
+  } finally { await w.dispose(); }
+});
+
 for (const name of ["grep", "find"] as const) {
   test(name + " obeys result limits and already-aborted signals", async () => {
     const w = await workspace();

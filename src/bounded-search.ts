@@ -93,10 +93,13 @@ export async function boundedGrep(
   if (context) flags.push(`--context=${context}`);
   if (args.ignoreCase) flags.push("--ignore-case");
   if (args.literal) flags.push("--fixed-strings");
-  if (typeof args.glob === "string") flags.push(`--glob=${args.glob}`);
-  flags.push("--", args.pattern, path);
-  const output = await run(binary, flags, boundary.root, signal, true);
+  if (typeof args.glob === "string") flags.push(`--glob=${args.glob.replace(/^(!?)(?:\.\/)+/, "$1")}`);
   const isDirectory = (await stat(await boundary.checkAbsolute(path))).isDirectory();
+  // rg roots globs at its cwd. Keep file searches unchanged; directory searches use "."
+  // so glob matching and output validation share one base on both old and new Pi hosts.
+  const searchCwd = isDirectory ? path : boundary.root;
+  flags.push("--", args.pattern, isDirectory ? "." : path);
+  const output = await run(binary, flags, searchCwd, signal, true);
   const found: string[] = [];
   let matches = 0;
   let skipped = false;
@@ -109,13 +112,14 @@ export async function boundedGrep(
     const file = event.data?.path?.text;
     const number = event.data?.line_number;
     if (typeof file !== "string" || typeof number !== "number") continue;
-    try { await boundary.checkAbsolute(resolve(boundary.root, file)); }
+    const absolute = resolve(searchCwd, file);
+    try { await boundary.checkAbsolute(absolute); }
     catch { skipped = true; continue; }
     if (event.type === "match") {
       if (matches >= maximum) { limited = true; break; }
       matches++;
     }
-    const label = (isDirectory ? relative(path, resolve(boundary.root, file)) : basename(path)).split("\\").join("/");
+    const label = (isDirectory ? relative(path, absolute) : basename(path)).split("\\").join("/");
     const text = (event.data?.lines?.text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "").replace(/\n$/, "");
     found.push(`${label}${event.type === "match" ? ":" : "-"}${number}: ${text.slice(0, 500)}${text.length > 500 ? "…" : ""}`);
   }

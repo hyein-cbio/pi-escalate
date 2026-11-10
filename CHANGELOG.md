@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.2 — 2026-11-10
+
+### Fixes
+
+- Resolve grep globs relative to the requested search directory, matching Pi 1.5.1 semantics on all supported hosts. Resolve reported paths against the same directory for boundary checks and labels, while preserving single-file searches and no-config/no-follow protections.
+- Ignore leading `./` in grep globs, including negated globs. The minimum Pi version remains 0.99.0; no new runtime dependency or version branch is required.
+
+### Improvements
+
+- Preserve explicit escalation authorization with Pi 1.5 user-message starts while rejecting custom-message starts.
+- Run locked/latest Pi compatibility checks in one ephemeral Modal App on pushes, same-repository PRs, monthly schedules, and manual dispatch.
+
+### Validation
+
+- Type checks and all 169 tests passed without skips on Pi 0.99.0, 1.0.3, 1.5.0, and 1.5.1 with Node.js 26.13.0 on macOS. Disposable checks pin and verify every installed Pi-family package; the checkout retains its existing 1.0.3 dependency tree.
+- Regression coverage includes nested directory globs, output-path boundary validation, path aliases, leading `./`, negation, context, and unchanged single-file searches.
+- CodeRabbit reviewed the five-file bounded-grep change and reported no findings before the version bump.
+- npm packaging and whitespace checks passed. The exact Node.js 22.19 floor and other operating systems were not separately rerun for this release; see `COMPATIBILITY.md`.
+
+**Full Changelog:** https://github.com/hyein-cbio/pi-escalate/compare/v0.2.1...v0.2.2
+
 ## 0.2.1 — 2026-10-14
 
 ### Improvements

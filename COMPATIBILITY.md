@@ -24,6 +24,12 @@ Function names alone cannot establish these semantics. The preceding 0.87.1 pack
 
 The current implementation also needs registry streaming/auth, the Agent's `prepareRequest` / `finishTurn` / tool hooks, native read-only tools, session identity/run signals, and TUI input/select/keybindings. Type checks and behavioral tests at the floor validate their use, including budgets, structured output, and aggregated usage.
 
+## Bounded search across host versions
+
+The investigation's own bounded grep uses the same path-relative glob semantics as Pi 1.5.1 without requiring that release. Directory searches run ripgrep inside the canonical search `path` against `.`; reported filenames are resolved against that same directory before boundary validation and display. Single-file searches retain their existing invocation. Leading `./` in globs is ignored, including after a negating `!`.
+
+This shared implementation works on older supported hosts as well as Pi 1.5.1; no version probe or duplicate search is needed. It deliberately retains controlled no-config/no-follow execution, no automatic binary downloads, and per-result boundary checks rather than delegating to the host's grep. The minimum host and peer dependency policy are unchanged.
+
 ## Host-provided peer dependencies
 
 All five host peers remain **`"*"`**, as required by Pi's [package guidance](https://github.com/earendil-works/pi/blob/v1.0.3/packages/coding-agent/docs/packages.md#declare-dependencies):
@@ -48,17 +54,25 @@ Both `/escalate <request>` (handoff) and `/escalate min <request>` authorize one
 
 ## Validation
 
-Verified compatibility for pi-escalate 0.2.1:
+Verified compatibility for pi-escalate 0.2.2:
 
-Checked on **2026-10-14**, using **Node.js 26.11.1 on macOS** and the locally installed Pi **1.0.3** dependency tree. The type check, all **163/163 tests**, package dry-run, and whitespace checks passed. Coverage includes English argument-completion suggestions and insertion through Pi's autocomplete provider, handoff/min preparation, the 500-byte UTF-8 limit, original-question enforcement, session-only settings and lifecycle isolation, Enter/Ctrl+S, save failures, and once-only start notifications, as well as the existing investigation boundaries and budgets.
+Checked on **2026-11-10**, using **Node.js 26.13.0 / macOS**. Type checks and **169/169 tests with no skips** passed on each host below. The 0.99.0, 1.5.0, and 1.5.1 checks used disposable copies with every installed Pi-family package pinned and verified against both the lockfile and installed metadata; 1.0.3 used the checkout's existing dependency tree. The original checkout's dependency versions were unchanged; only the package release version was updated in its manifest and lockfile. Package dry-run and whitespace checks also passed.
 
-| Pi packages | Verification for 0.2.1 |
+| Pi packages | Verification for 0.2.2 |
 |---|---|
-| 1.0.3 | Local type check and all 163 tests passed. |
-| 0.99.0 / 1.0.0 | Allowed by runtime policy; not rerun for this release. |
+| 0.99.0 | Exact-version type check and all 169 tests passed. |
+| 1.0.3 | Local type check and all 169 tests passed. |
+| 1.5.0 | Exact-version type check and all 169 tests passed. |
+| 1.5.1 | Exact-version type check and all 169 tests passed. |
 | Other stable 0.99.x / 1.x releases | Allowed by runtime policy and subject to capability checks; not individually tested. |
 
-This release was not rerun in disposable copies with every transitive Pi package pinned. The exact Node.js 22.19 engine floor was not separately exercised.
+The exact Node.js 22.19 engine floor and other operating systems were not separately exercised for this release. Local HTTP fixtures do not certify a live oracle-provider invocation. The minimum host remains Pi 0.99.0.
+
+Regression tests cover path-relative and basename globs, leading `./`, negation, context, absolute/file-URL/aliased directory paths, a symlinked cwd, external-link omission, correct result-path validation, and unchanged single-file searches. The directory-glob regression failed before the fix with `No matches found.`.
+
+### Historical v0.2.1 validation
+
+Checked on **2026-10-14**, using **Node.js 26.11.1 / macOS** and the locally installed Pi **1.0.3** dependency tree. The type check, all **163/163 tests**, package dry-run, and whitespace checks passed. Older accepted hosts and the exact Node.js 22.19 floor were not separately rerun for that release. Coverage included English argument-completion suggestions and insertion through Pi's autocomplete provider, handoff/min preparation, the 500-byte UTF-8 limit, session-only settings, and the existing investigation boundaries and budgets.
 
 ### Historical v0.1.3 validation
 

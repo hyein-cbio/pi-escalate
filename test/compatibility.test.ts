@@ -13,7 +13,7 @@ import { EscalatePermission } from "../src/permission.ts";
 test("runtime policy accepts the floor, stable future 1.x minors, and SemVer build metadata", () => {
   assert.equal(MIN_PI_VERSION, "0.99.0");
   assert.equal(SUPPORTED_PI_RANGE, ">=0.99.0 <0.100.0 || >=1.0.0 <2.0.0");
-  for (const version of ["0.99.0", "0.99.2", "0.99.99", "1.0.0", "1.0.3", "1.1.0", "1.99.7",
+  for (const version of ["0.99.0", "0.99.2", "0.99.99", "1.0.0", "1.0.3", "1.1.0", "1.5.0", "1.5.1", "1.99.7",
     "1.0.3+custom", "1.1.0+build.001"]) assertHostVersion(version);
 });
 

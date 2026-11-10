@@ -12,14 +12,16 @@ Requires a stable **Pi 0.99.x or 1.x** release (`@earendil-works/pi-coding-agent
 
 Pi [0.99.0](https://github.com/earendil-works/pi/releases/tag/v0.99.0) introduced the required built-in codemode, tool exposure, structured tool results, nested execution, and usage-accounting APIs. Pi [1.0.0](https://github.com/earendil-works/pi/releases/tag/v1.0.0) made codemode leaner; it is not the first version that provides these APIs.
 
-Verified compatibility for pi-escalate 0.2.1:
+Verified compatibility for pi-escalate 0.2.2:
 
 | Pi version | Type check | Tests |
 |---|---|---|
-| 1.0.3 | Passed | 163/163 passed |
-| 0.99.0 / 1.0.0 | Allowed by runtime policy | Not rerun for 0.2.1 |
+| 0.99.0 | Passed | 169/169 passed |
+| 1.0.3 | Passed | 169/169 passed |
+| 1.5.0 | Passed | 169/169 passed |
+| 1.5.1 | Passed | 169/169 passed |
 
-The 0.2.1 release was checked on 2026-10-14 with Node.js 26.11.1 on macOS using the locally installed Pi 1.0.3 dependency tree. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; no paid model calls are required. Packaging and whitespace checks also passed. This is not a full exact-version compatibility-matrix run, and the Node.js 22.19 engine floor was not separately exercised. See [validation details and historical results](COMPATIBILITY.md#validation).
+The 0.2.2 release was checked on 2026-11-10 with Node.js 26.13.0 on macOS. Pi 0.99.0, 1.5.0, and 1.5.1 used disposable copies with every installed Pi-family package pinned and verified; 1.0.3 used the checkout's existing dependency tree. Tests exercise the real SDK, extension loader, codemode, and local HTTP provider fixtures; no paid model calls are required. Packaging and whitespace checks also passed. The minimum Pi version remains 0.99.0; the exact Node.js 22.19 engine floor and other operating systems were not separately exercised for this release. See [validation details and historical results](COMPATIBILITY.md#validation).
 
 Install from npm:
 
