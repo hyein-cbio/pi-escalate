@@ -51,7 +51,7 @@
     "typebox": "*"
   },
   "overrides": {
-    "undici": "^8.12.3"
+    "undici": "^8.12.4"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.0.3",

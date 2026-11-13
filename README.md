@@ -29,6 +29,12 @@ Install from npm:
 pi install npm:@hyein-cbio/pi-escalate
 ```
 
+### Pi host security: Undici
+
+**Installing or updating this extension does not patch Pi's own HTTP dependencies.** The Undici override in this repository protects its development dependency tree only. Git installs omit those development dependencies, and npm installs do not propagate this package's override to the host. API compatibility checks are not a security certification.
+
+Use a Pi release with the required Undici fixes, or apply the verified `8.12.4` override in the **npm project that installs the Pi CLI itself**, reinstall there, and restart Pi. Putting it in this extension or an unrelated working project's `package.json` is not sufficient. See [host dependency security](COMPATIBILITY.md#host-dependency-security-undici) for the exact procedure and host-relative version check.
+
 ### Required: enable codemode
 
 **Installing this package alone does not enable investigation.** Pi's built-in `codemode` tool must be active; it is off by default unless another integration enables it. `/escalate set` still works without codemode, but both investigation modes stop before dispatch when codemode is inactive.

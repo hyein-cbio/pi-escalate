@@ -42,6 +42,68 @@ All five host peers remain **`"*"`**, as required by Pi's [package guidance](htt
 
 Do not bundle a second set or install independent runtime copies. Use the matching packages supplied by one Pi installation. The runtime gate checks the coding-agent host version and required capabilities; **it does not prove that all peer package versions match**, and it does not certify arbitrary forks. TypeBox is checked for the schema-building functions used by this extension, not artificially restricted to one tested minor line.
 
+## Host dependency security: Undici
+
+**Supported Pi APIs do not imply patched host dependencies.** This extension uses the Pi packages supplied by the host. Its `overrides` and development lockfile cannot replace the Undici imported by a separately installed Pi HTTP dispatcher. Adding a runtime copy of Undici to this extension would not change that host import either.
+
+PR [#1](https://github.com/hyein-cbio/pi-escalate/pull/1) (merge `c33d5e1a7c7673db3af864c3aa4b5905c0f47493`) locked Undici `8.12.4` with `dev: true`. Pi's npm-backed Git installation runs `npm install --omit=dev --legacy-peer-deps` (with additional audit/funding flags in Pi 1.5.2), so that development dependency is omitted. In npm dependency installations, [only the consuming project's root overrides apply](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides). Neither installation route patches the separate host tree.
+
+The reported isolated Git-install verification at that merge found:
+
+| Pi host | Host dispatcher's Undici before → after extension installation |
+|---|---|
+| 1.0.3 | `8.10.2` → `8.10.2` |
+| 1.5.2 | `8.12.3` → `8.12.3` |
+| 1.5.2, installed with its host project's root override | `8.12.4` → `8.12.4` |
+
+These are the reported #1 installation results, not a claim that the extension repaired the host. The development override now starts at `^8.12.4`, so a fresh development resolution cannot select `8.12.3`.
+
+### Remediate the Pi host, not the extension
+
+Prefer a Pi release whose own dependency tree contains the required fixes. If your npm-installed host still resolves the affected version, the verified workaround is:
+
+1. Locate the **npm project that installs `@earendil-works/pi-coding-agent` as a dependency**, not this extension's Git checkout, Pi's extension-package directory, or an unrelated working project.
+2. Merge the following into that host project's root `package.json`, preserving its existing dependencies and other overrides:
+
+   ```json
+   {
+     "overrides": {
+       "undici": "8.12.4"
+     }
+   }
+   ```
+
+3. Run `npm install` **in that host project**, updating its lockfile and installed modules. Merely editing the manifest or reinstalling the extension is insufficient.
+4. Check the host-relative resolution below, restart Pi, and make sure you launch that installation (for a local npm host project, `./node_modules/.bin/pi`). An older global `pi` elsewhere on `PATH` remains unchanged.
+
+For a globally installed or externally managed Pi without an editable npm host project, upgrade through its installer to a fixed release, or create a separate local npm host project and install your chosen Pi version there with the root override. Do not edit generated managed-release directories and assume the change will survive an update. This extension does not modify the host installation, replace its global HTTP dispatcher, or enforce a host security-version gate.
+
+`8.12.4` is the target verified for this report, not an evergreen guarantee against later advisories. Reassess the override against upstream security releases before changing or removing it.
+
+### Verify the host's actual module resolution
+
+For the npm host project above, run this check with its absolute path. It resolves **and loads** Undici from the Pi HTTP dispatcher's location, rather than checking a possibly unrelated top-level copy:
+
+```sh
+cd /absolute/path/to/pi-host
+node --input-type=module <<'JS'
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+const hostEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+const dispatcher = new URL("./core/http-dispatcher.js", hostEntry);
+const fromDispatcher = createRequire(dispatcher);
+const metadata = fromDispatcher.resolve("undici/package.json");
+const undici = await import(pathToFileURL(fromDispatcher.resolve("undici")).href);
+assert.equal(typeof undici.Agent, "function");
+console.log({ dispatcher: dispatcher.href, undici: metadata, version: fromDispatcher(metadata).version });
+JS
+```
+
+For the exact workaround, confirm the printed version is `8.12.4` and the paths belong to the Pi installation you will launch. A host updated to a newer fixed version should print that version instead. The check loads the module without configuring a dispatcher or making HTTP requests. It targets the published Pi 1.0.3/1.5.2 layout; other packaging layouts need their corresponding dispatcher path.
+
+The repository's dependency regression tests likewise check the **development host** after installing development dependencies. They cannot certify a user's separately installed Pi. Functional compatibility results below are not security attestations.
+
 ## Failure behavior
 
 The public `src/index.ts` is an asynchronous bootstrap. It imports the host namespace, checks the version, and validates registration APIs before importing the implementation's newer named exports. Missing capabilities produce a `pi-escalate: incompatible Pi host` error with an upgrade/restart instruction before any commands, hooks, or tools are registered.

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Security scope correction
+
+- Raise the development-only Undici override from `^8.12.3` to `^8.12.4`; retain the locked `8.12.4` development dependency. PR #1 updated this repository's development tree, not the Undici used by an installed Pi host.
+- Document the host-level remediation and a dispatcher-relative version check. Installing this extension from Git or npm does not patch Pi's HTTP dependencies; the host must be updated or reinstalled with its own root override.
+- Add regression checks for the development override, locked Undici versions, and the Undici resolved and loaded from the development Pi host's HTTP dispatcher. These checks do not certify users' separate Pi installations.
+
+### Validation
+
+- On Node.js 22.23.1 / macOS with the locked Pi 1.0.3 development host, type checking and all 171 tests passed without skips after a clean install. The new dispatcher check detected the stale installed Undici `8.10.2` before reinstalling and loaded `8.12.4` afterward.
+- The documented host-resolution snippet, npm package dry-run, and whitespace check passed. A disposable production-only install using Pi's npm dependency flags confirmed that development Undici is omitted; this is not a rerun of the full Git-install matrix reported in `COMPATIBILITY.md`.
+
 ## 0.2.2 — 2026-11-10
 
 ### Fixes

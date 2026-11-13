@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import bootstrap from "../src/index.ts";
 import {
@@ -33,6 +35,41 @@ test("host-supplied peers remain wildcard, lockfile agrees, and compatibility do
   assert.equal(pkg.peerDependencies.typebox, "*");
   assert.deepEqual(lock.packages[""].peerDependencies, pkg.peerDependencies);
   assert(pkg.files.includes("COMPATIBILITY.md"));
+});
+
+function assertPatchedUndici(version: string, location: string): void {
+  assert.match(version, /^\d+\.\d+\.\d+$/, `${location}: expected a stable Undici version`);
+  const [major, minor, patch] = version.split(".").map(Number);
+  assert(major > 8 || (major === 8 && (minor > 12 || (minor === 12 && patch >= 4))),
+    `${location}: expected Undici >=8.12.4, got ${version}`);
+}
+
+test("Undici override protects the development tree without adding a runtime dependency", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
+  assert.equal(pkg.overrides.undici, "^8.12.4");
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    assert.equal(pkg[field]?.undici, undefined, `${field}: do not add an ineffective host patch`);
+  }
+  const entries = Object.entries(lock.packages).filter(([path]) => /(?:^|\/)node_modules\/undici$/.test(path));
+  assert(entries.length > 0, "expected a locked development Undici dependency");
+  for (const [path, entry] of entries) {
+    const dependency = entry as { version: string; dev?: boolean };
+    assertPatchedUndici(dependency.version, path);
+    assert.equal(dependency.dev, true, `${path}: host dependencies remain development-only`);
+  }
+});
+
+test("development Pi HTTP dispatcher resolves and loads patched Undici, not just a lockfile entry", async () => {
+  // This tests the checkout's host, never a user's separately installed Pi.
+  const hostEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
+  const dispatcher = new URL("./core/http-dispatcher.js", hostEntry);
+  await readFile(dispatcher); // Fail if the published host layout changes.
+  const fromDispatcher = createRequire(dispatcher);
+  const metadata = fromDispatcher.resolve("undici/package.json");
+  assertPatchedUndici(fromDispatcher(metadata).version, metadata);
+  const undici = await import(pathToFileURL(fromDispatcher.resolve("undici")).href);
+  assert.equal(typeof undici.Agent, "function");
 });
 
 test("compatibility documents each mark the current package release exactly once", async () => {
