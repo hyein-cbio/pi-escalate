@@ -50,6 +50,9 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "overrides": {
+    "undici": "^8.12.3"
+  },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.0.3",
     "@earendil-works/pi-ai": "1.0.3",
