@@ -91,6 +91,47 @@ class ModalCITests(unittest.TestCase):
         ])
         self.assertTrue(all(call.args[1] == self.workspace for call in command.call_args_list))
 
+    def test_locked_suite_rejects_mixed_direct_and_nested_versions_before_checks(self):
+        for path in (
+            "node_modules/@earendil-works/pi-ai",
+            "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai",
+        ):
+            self.write_family("1.5.2")
+            lock_path = self.workspace / "package-lock.json"
+            lock = json.loads(lock_path.read_text())
+            lock["packages"][path] = {"version": "1.0.3"}
+            lock_path.write_text(json.dumps(lock))
+            installed = self.workspace / path / "package.json"
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            installed.write_text('{"version":"1.0.3"}')
+            with self.subTest(path=path), patch.object(ci, "command") as command:
+                with self.assertRaisesRegex(ValueError, "Mixed Pi versions"):
+                    ci.run_checks("locked", self.workspace)
+                self.assertEqual(command.call_args_list[-1].args[0], ["npm", "ci", "--ignore-scripts"])
+
+    def test_locked_suite_checks_installed_metadata_against_the_lock(self):
+        installed = self.workspace / "node_modules/@earendil-works/pi-ai/package.json"
+        installed.write_text('{"version":"1.5.2"}')
+        with patch.object(ci, "command") as command:
+            with self.assertRaisesRegex(ValueError, "Mixed Pi versions"):
+                ci.run_checks("locked", self.workspace)
+            self.assertEqual(command.call_args_list[-1].args[0], ["npm", "ci", "--ignore-scripts"])
+
+    def test_chord_is_optional_but_must_match_when_present(self):
+        path = "node_modules/@earendil-works/chord"
+        lock_path = self.workspace / "package-lock.json"
+        lock = json.loads(lock_path.read_text())
+        lock["packages"].pop(path, None)
+        lock_path.write_text(json.dumps(lock))
+        ci.verify_pi_family(self.workspace, "1.0.3")
+        lock["packages"][path] = {"version": "1.5.2"}
+        lock_path.write_text(json.dumps(lock))
+        installed = self.workspace / path / "package.json"
+        installed.parent.mkdir(parents=True, exist_ok=True)
+        installed.write_text('{"version":"1.5.2"}')
+        with self.assertRaisesRegex(ValueError, "Mixed Pi versions"):
+            ci.verify_pi_family(self.workspace, "1.0.3")
+
     def test_latest_suite_does_not_fall_back_to_locked_install(self):
         with patch.object(ci, "command") as command, patch.object(ci, "prepare_latest", return_value="1.5.0") as latest:
             self.assertEqual(ci.run_checks("latest", self.workspace), {"host": "latest", "pi": "1.5.0"})

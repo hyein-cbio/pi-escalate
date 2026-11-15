@@ -22,9 +22,10 @@ UPLOAD_FILES = (
 UPLOAD_DIRS = ("src", "test")
 PI_PACKAGES = tuple(f"@earendil-works/{name}" for name in (
     "pi-coding-agent", "pi-agent-core", "pi-ai", "pi-codemode",
-    "pi-tui", "pi-mcp", "pi-telemetry", "chord",
+    "pi-tui", "pi-mcp", "pi-telemetry",
 ))
 EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", re.ASCII)
+# Discover optional family members too: older hosts use chord; newer ones use pi-schema.
 PI_PATH = re.compile(r"(?:^|/)node_modules/@earendil-works/(pi-[^/]+|chord)$")
 app = modal.App("pi-escalate-ci")
 
@@ -101,6 +102,7 @@ def run_checks(host, workspace):
     else:
         command(["npm", "ci", "--ignore-scripts"], workspace)
         version = json.loads((workspace / "node_modules/@earendil-works/pi-coding-agent/package.json").read_text())["version"]
+        verify_pi_family(workspace, version)
     print(f"Running {host} checks with Pi {version}", flush=True)
     for args in (
         ["npm", "ls", "--all"],
